@@ -21,9 +21,13 @@ function notesOf({ releaseNotes }: UpdateInfo): string | undefined {
   return releaseNotes?.map((entry) => entry.note).join('\n') || undefined;
 }
 
+const GITHUB_REPO = {
+  owner: 'Srlimao',
+  repo: 'sable-next',
+} as const;
 const FEEDS = {
-  stable: 'https://git.sable.moe/SableClient/sable-next/releases/download/latest/',
-  nightly: 'https://git.sable.moe/SableClient/sable-next/releases/download/nightly/',
+  stable: `https://github.com/${GITHUB_REPO.owner}/${GITHUB_REPO.repo}/releases/latest/download/`,
+  nightly: `https://github.com/${GITHUB_REPO.owner}/${GITHUB_REPO.repo}/releases/download/nightly/`,
 };
 const builtChannel = app.getVersion().includes('-nightly.') ? 'nightly' : 'stable';
 const feedChannel = (channel: keyof typeof FEEDS) => (channel === 'stable' ? 'latest' : 'nightly');
@@ -37,6 +41,7 @@ export function supportsAutoUpdate(): boolean {
     app.isPackaged &&
     autoUpdate !== false &&
     !process.mas &&
+    !process.env.PORTABLE_EXECUTABLE_FILE &&
     installMethod() !== 'flatpak' &&
     (process.platform === 'darwin' ||
       process.platform === 'win32' ||
@@ -46,12 +51,12 @@ export function supportsAutoUpdate(): boolean {
 
 export function setUpdateChannel(channel: keyof typeof FEEDS): void {
   if (!supportsAutoUpdate()) return;
+  autoUpdater.allowPrerelease = channel === 'nightly';
   autoUpdater.setFeedURL({
-    provider: 'generic',
-    url: FEEDS[channel],
-    channel: feedChannel(channel),
-    // Forgejo serves multipart byteranges too slowly.
-    useMultipleRangeRequest: false,
+    provider: 'github',
+    owner: GITHUB_REPO.owner,
+    repo: GITHUB_REPO.repo,
+    ...(channel === 'stable' ? { channel: 'latest' } : {}),
   });
   // Moving from nightly to an older stable is a downgrade to the updater.
   autoUpdater.allowDowngrade = channel !== builtChannel;

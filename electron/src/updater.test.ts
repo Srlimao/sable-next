@@ -35,6 +35,7 @@ beforeEach(() => {
   });
   vi.stubEnv('FLATPAK_ID', '');
   vi.stubEnv('APPIMAGE', '');
+  vi.stubEnv('PORTABLE_EXECUTABLE_FILE', '');
   mocks.app.isPackaged = true;
   mocks.app.getVersion = () => '2.0.0';
   mocks.app.getAppPath = () => 'electron';
@@ -74,6 +75,31 @@ test.each(['darwin', 'win32'])('%s retains updates without Linux metadata', (pla
   expect(supportsAutoUpdate()).toBe(true);
 });
 
+test('Windows portable builds do not offer in-place self updates', () => {
+  vi.stubGlobal('process', { ...process, platform: 'win32' });
+  vi.stubEnv('PORTABLE_EXECUTABLE_FILE', 'C:\\Portable\\sable-26.11.4-x64-portable.exe');
+  expect(supportsAutoUpdate()).toBe(false);
+  setUpdateChannel('stable');
+  expect(mocks.setFeedURL).not.toHaveBeenCalled();
+});
+
+test('Windows NSIS installs configure the GitHub release updater feed', () => {
+  vi.stubGlobal('process', { ...process, platform: 'win32' });
+  setUpdateChannel('stable');
+  expect(mocks.setFeedURL).toHaveBeenLastCalledWith({
+    provider: 'github',
+    owner: 'Srlimao',
+    repo: 'sable-next',
+    channel: 'latest',
+  });
+  setUpdateChannel('nightly');
+  expect(mocks.setFeedURL).toHaveBeenLastCalledWith({
+    provider: 'github',
+    owner: 'Srlimao',
+    repo: 'sable-next',
+  });
+});
+
 test('MAS builds do not configure or check for updates', async () => {
   vi.stubGlobal('process', { ...process, platform: 'darwin', mas: true });
   expect(supportsAutoUpdate()).toBe(false);
@@ -87,8 +113,8 @@ test('MAS builds do not configure or check for updates', async () => {
 });
 
 test.each([
-  ['2.0.0', 'latest/latest-linux.yml'],
-  ['2.0.1-nightly.261102225045.g31a82d40d5f4', 'nightly/nightly-linux.yml'],
+  ['2.0.0', 'releases/latest/download/latest-linux.yml'],
+  ['2.0.1-nightly.261102225045.g31a82d40d5f4', 'releases/download/nightly/nightly-linux.yml'],
 ])('Flatpak %s reads the latest version from its own channel feed', async (version, feed) => {
   vi.stubEnv('FLATPAK_ID', 'moe.sable.client');
   vi.resetModules();
@@ -109,7 +135,7 @@ test.each([
     ([channel]) => channel === 'sable-update-latest-version'
   );
   expect(await handler?.[1]({ senderFrame: {} })).toBe('2.1.0');
-  expect(fetch).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`/download/${feed}$`)), {
+  expect(fetch).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`/${feed}$`)), {
     cache: 'no-store',
   });
 });

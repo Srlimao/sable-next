@@ -27,10 +27,10 @@ extraResources:
 
 npmRebuild: false
 afterPack: ./after-pack.mjs
-# Generate metadata here; CI uploads it to Forgejo.
 publish:
-  provider: generic
-  url: https://git.sable.moe/SableClient/sable-next/releases/download/${channel}
+  provider: github
+  owner: Srlimao
+  repo: sable-next
 
 mac:
   artifactName: sable-${version}-${arch}.${ext}
