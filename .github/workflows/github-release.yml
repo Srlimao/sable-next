@@ -1,6 +1,9 @@
-name: Build Windows Setup & GitHub Release
+name: Build Windows Setup & Portable GitHub Release
 
 on:
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       tag:
@@ -55,6 +58,9 @@ jobs:
         run: |
           if [ -n "$INPUT_TAG" ]; then
             tag="$INPUT_TAG"
+            version="${tag#v}"
+          elif [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            tag="$GITHUB_REF_NAME"
             version="${tag#v}"
           else
             version="$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")"
@@ -151,6 +157,6 @@ jobs:
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
               --title "Sable $VERSION ($FLAVOR)" \
-              --notes "Windows setup built from commit $GITHUB_SHA ($FLAVOR flavor)." \
+              --notes "Windows setup and portable builds from commit $GITHUB_SHA ($FLAVOR flavor)." \
               "${extra_args[@]}"
           fi

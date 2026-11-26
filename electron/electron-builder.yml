@@ -59,6 +59,9 @@ win:
   target:
     - nsis
     - msi
+    - portable
+portable:
+  artifactName: sable-${version}-${arch}-portable.${ext}
 nsis:
   oneClick: false
   installerIcon: ../src-tauri/icons/icon.ico
