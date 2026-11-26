@@ -2,6 +2,7 @@
   import { i18n } from '#lib/i18n.js';
   import CornersInIcon from 'phosphor-svelte/lib/CornersInIcon';
   import CornersOutIcon from 'phosphor-svelte/lib/CornersOutIcon';
+  import EyeSlashIcon from 'phosphor-svelte/lib/EyeSlashIcon';
   import LockIcon from 'phosphor-svelte/lib/LockSimpleIcon';
   import MicrophoneSlashIcon from 'phosphor-svelte/lib/MicrophoneSlashIcon';
   import MonitorArrowUpIcon from 'phosphor-svelte/lib/MonitorArrowUpIcon';
@@ -27,7 +28,11 @@
   import Tooltip from '#lib/ui/primitives/Tooltip.svelte';
 
   import CallControls from './CallControls.svelte';
-  import { preferences } from '#lib/settings/preferences.svelte.js';
+  import {
+    isLockedPreference,
+    preferences,
+    setPreference,
+  } from '#lib/settings/preferences.svelte.js';
   import { electronBridge } from '#lib/platform/electron.js';
   import CallModeDebug from './CallModeDebug.svelte';
   import CallPlayback from './CallPlayback.svelte';
@@ -40,7 +45,9 @@
     GRID_GAP_PX,
     NARROW_STAGE_PX,
     featuredTiles,
+    hasScreenShare,
     togglePin,
+    visibleTiles,
     type CallTile,
   } from './call-layout';
   import type { CallSession } from './call-session.svelte.js';
@@ -130,11 +137,17 @@
 
   let pinned = $derived(session.layout.pinned);
   let gridForced = $derived(session.layout.gridForced);
-  let featured = $derived(pinned === null && gridForced ? [] : featuredTiles(tiles, pinned));
+  let screenSharing = $derived(hasScreenShare(tiles));
+  let participantsHidden = $derived(screenSharing && preferences.callHideParticipantsWhenSharing);
+  let shownTiles = $derived(visibleTiles(tiles, participantsHidden));
+  let featured = $derived(
+    pinned === null && gridForced && shownTiles.length > 1 ? [] : featuredTiles(shownTiles, pinned)
+  );
   let spotlight = $derived(featured.length > 0);
-  let strip = $derived(spotlight ? tiles.filter((tile) => !featured.includes(tile)) : []);
+  let strip = $derived(spotlight ? shownTiles.filter((tile) => !featured.includes(tile)) : []);
   let canSpotlight = $derived(
-    featured.length > 0 || tiles.some((tile) => tile.source === 'screen' && tile.watching)
+    shownTiles.length > 1 &&
+      (featured.length > 0 || shownTiles.some((tile) => tile.source === 'screen' && tile.watching))
   );
 
   let noticeHeight = $state(0);
@@ -143,7 +156,7 @@
   let mediaWidth = $state(0);
   let mediaHeight = $state(0);
   let aspect = $derived(mediaWidth > 0 && mediaWidth < NARROW_STAGE_PX ? 1 : 16 / 9);
-  let grid = $derived(bestGrid(tiles.length, mediaWidth, mediaHeight, GRID_GAP_PX, aspect));
+  let grid = $derived(bestGrid(shownTiles.length, mediaWidth, mediaHeight, GRID_GAP_PX, aspect));
   let featuredWidth = $state(0);
   let featuredHeight = $state(0);
   let featuredGrid = $derived(
@@ -151,11 +164,22 @@
   );
 
   function pin(tile: CallTile): void {
-    session.layout = togglePin(tiles, featured, tile);
+    session.layout = togglePin(shownTiles, featured, tile);
   }
 
   function toggleLayout(): void {
     session.layout = spotlight ? { pinned: null, gridForced: true } : { pinned, gridForced: false };
+  }
+
+  function toggleHideParticipants(): void {
+    const next = !preferences.callHideParticipantsWhenSharing;
+    setPreference('callHideParticipantsWhenSharing', next);
+    if (next && pinned !== null) {
+      const pinnedTile = tiles.find((tile) => tile.key === pinned);
+      if (pinnedTile?.source === 'camera') {
+        session.layout = { pinned: null, gridForced: session.layout.gridForced };
+      }
+    }
   }
 
   let now = $state(Date.now());
@@ -295,6 +319,26 @@
       {/if}
     </p>
     <div class="top-actions">
+      {#if screenSharing}
+        {@const hideLabel = i18n.t(
+          participantsHidden ? 'call.showParticipants' : 'call.hideParticipants'
+        )}
+        <Tooltip label={hideLabel} side="bottom">
+          {#snippet trigger({ props })}
+            <IconButton
+              {...props}
+              variant={participantsHidden ? 'primary' : 'secondary'}
+              size="small"
+              label={hideLabel}
+              aria-pressed={participantsHidden}
+              disabled={isLockedPreference('callHideParticipantsWhenSharing')}
+              onclick={toggleHideParticipants}
+            >
+              <EyeSlashIcon weight={participantsHidden ? 'fill' : 'bold'} />
+            </IconButton>
+          {/snippet}
+        </Tooltip>
+      {/if}
       {#if canSpotlight}
         <IconButton
           variant="secondary"
@@ -477,7 +521,7 @@
         bind:width={mediaWidth}
         bind:height={mediaHeight}
       >
-        {#each tiles as item (item.key)}
+        {#each shownTiles as item (item.key)}
           {@render tile(item, false)}
         {/each}
         {#if alone}
@@ -524,7 +568,7 @@
     avatar={profile.avatar}
     featured={large}
     pinned={featured.length === 1 && featured[0].key === item.key}
-    onPin={tiles.length > 1 && (item.source === 'camera' || item.watching)
+    onPin={shownTiles.length > 1 && (item.source === 'camera' || item.watching)
       ? () => pin(item)
       : undefined}
     watchingScreen={item.watching}

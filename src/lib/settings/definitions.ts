@@ -489,6 +489,7 @@ const SETTINGS = {
   ringForGroupCalls: toggle(false, { account: true }),
   alwaysShowCallButton: toggle(false, { account: true }),
   callScreenPreview: toggle(true, { account: true }),
+  callHideParticipantsWhenSharing: toggle(false, { account: true, device: true }),
   callMode: choice(CALL_MODES, 'auto'),
   callServiceUrl: text(''),
   incomingCallSound: toggle(true, { account: true }),

@@ -13,7 +13,7 @@ vi.mock('$app/navigation', () => import('#lib/test-support/app-navigation.js'));
 
 import type { CoreClient } from '#lib/core/client.svelte.js';
 
-import { preferences } from '#lib/settings/preferences.svelte.js';
+import { preferences, setPreference } from '#lib/settings/preferences.svelte.js';
 import { goto } from '#lib/test-support/app-navigation.js';
 
 import { recordCallDebug } from './call-debug.svelte.js';
@@ -25,6 +25,7 @@ import { idleTransportState } from './call-transport';
 import CallViewHarness from './CallViewHarness.test.svelte';
 
 afterEach(() => {
+  setPreference('callHideParticipantsWhenSharing', false);
   vi.restoreAllMocks();
   Reflect.deleteProperty(HTMLElement.prototype, 'requestFullscreen');
   Reflect.deleteProperty(document, 'fullscreenEnabled');
@@ -311,4 +312,129 @@ test('reporting a problem from a call opens the bug report with a call snapshot'
     expect(goto).toHaveBeenCalledOnce();
   });
   expect(takeCallSnapshot()).toMatchObject({ lifecycle: 'active', members: 2, participants: 1 });
+});
+
+test('does not show the hide-participants toggle when nobody is screen sharing', () => {
+  mountBothSharing({ identity: 'me:AAAA', local: true }, [{ identity: 'me:BBBB' }], '@there:x', []);
+  expect(screen.queryByRole('button', { name: /participants$/i })).not.toBeInTheDocument();
+});
+
+test('toggles hiding user cards on a single watched or unwatched screen share and remembers the preference', async () => {
+  const user = userEvent.setup();
+  const { container, unmount } = mountBothSharing(
+    { identity: 'me:AAAA', local: true },
+    [{ identity: 'me:BBBB', screenShare: shared }],
+    '@there:x',
+    [shared.id]
+  );
+
+  expect(container.querySelector('.strip')).toBeInTheDocument();
+  expect(screen.getByText('1 other person in the call')).toBeInTheDocument();
+
+  const hideButton = screen.getByRole('button', { name: 'Hide participants' });
+  expect(hideButton).toHaveAttribute('aria-pressed', 'false');
+  await user.click(hideButton);
+
+  expect(preferences.callHideParticipantsWhenSharing).toBe(true);
+  expect(container.querySelector('.strip')).not.toBeInTheDocument();
+  expect(container.querySelectorAll('.featured .tile')).toHaveLength(1);
+  expect(screen.getByText('1 other person in the call')).toBeInTheDocument();
+  const showButton = screen.getByRole('button', { name: 'Show participants' });
+  expect(showButton).toHaveAttribute('aria-pressed', 'true');
+
+  unmount();
+
+  // Also applies in Grid view with an unwatched remote screen share.
+  const unwatched = mountBothSharing(
+    { identity: 'me:AAAA', local: true },
+    [{ identity: 'me:BBBB', screenShare: shared }],
+    '@there:x',
+    []
+  );
+  expect(unwatched.container.querySelector('.featured')).not.toBeInTheDocument();
+  expect(unwatched.container.querySelectorAll('.grid .tile')).toHaveLength(1);
+  expect(unwatched.getByText('@there:x’s screen')).toBeInTheDocument();
+});
+
+test('keeps secondary screen shares visible in the strip and grid when user cards are hidden', async () => {
+  const user = userEvent.setup();
+  const { container } = mountBothSharing();
+
+  await user.click(screen.getByRole('button', { name: 'Hide participants' }));
+
+  const strip = within(screen.getByRole('list', { name: /participants?$/ }));
+  expect(strip.getAllByRole('listitem')).toHaveLength(1);
+  expect(strip.getByText('@here:x’s screen')).toBeInTheDocument();
+  expect(container.querySelectorAll('.featured .tile')).toHaveLength(1);
+
+  await user.click(screen.getByRole('button', { name: 'Grid view' }));
+  expect(container.querySelector('.featured')).not.toBeInTheDocument();
+  expect(container.querySelectorAll('.grid .tile')).toHaveLength(2);
+});
+
+test('hiding user cards unpins a pinned camera without snapping back when shown again', async () => {
+  const user = userEvent.setup();
+  const { container } = mountBothSharing(
+    { identity: 'me:AAAA', local: true },
+    [{ identity: 'me:BBBB', screenShare: shared }],
+    '@there:x',
+    [shared.id]
+  );
+
+  const strip = within(screen.getByRole('list', { name: /participants?$/ }));
+  await user.click(strip.getByRole('button', { name: 'Pin @here:x' }));
+  const featured = container.querySelector<HTMLElement>('.featured');
+  if (!featured) throw new Error('no featured tile');
+  expect(
+    within(featured).getByRole('button', {
+      name: 'Unpin @here:x',
+    })
+  ).toBeInTheDocument();
+
+  await user.click(screen.getByRole('button', { name: 'Hide participants' }));
+  expect(container.querySelector('.strip')).not.toBeInTheDocument();
+  expect(container.querySelector('.featured .screen')).toBeInTheDocument();
+
+  await user.click(screen.getByRole('button', { name: 'Show participants' }));
+  expect(container.querySelector('.strip')).toBeInTheDocument();
+  expect(container.querySelector('.featured .screen')).toBeInTheDocument();
+});
+
+test('restores user cards when all screen shares stop and auto-hides when sharing resumes', async () => {
+  const user = userEvent.setup();
+  const session = new CallSession({} as CoreClient);
+  session.lifecycle = 'active';
+  session.mediaReady = true;
+  session.transport = {
+    ...idleTransportState(),
+    connection: 'connected',
+    self: { identity: '@here:x', local: true },
+    participants: [{ identity: '@there:x', screenShare: shared }],
+  };
+  session.watchedScreenShareIds = [shared.id];
+  const { container } = render(CallViewHarness, { session, members: [] });
+
+  await user.click(screen.getByRole('button', { name: 'Hide participants' }));
+  expect(container.querySelector('.strip')).not.toBeInTheDocument();
+
+  session.transport = {
+    ...session.transport,
+    participants: [
+      { identity: '@there:x', microphone: { id: 'm', muted: true, subscribed: true } },
+    ],
+  };
+  await vi.waitFor(() => {
+    expect(screen.queryByRole('button', { name: /participants$/i })).not.toBeInTheDocument();
+    expect(container.querySelectorAll('.grid .tile')).toHaveLength(2);
+  });
+
+  session.transport = {
+    ...session.transport,
+    participants: [{ identity: '@there:x', screenShare: shared }],
+  };
+  await vi.waitFor(() => {
+    expect(screen.getByRole('button', { name: 'Show participants' })).toBeInTheDocument();
+    expect(container.querySelector('.strip')).not.toBeInTheDocument();
+    expect(container.querySelectorAll('.featured .tile')).toHaveLength(1);
+  });
 });

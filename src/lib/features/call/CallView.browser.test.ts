@@ -1,15 +1,19 @@
 import { afterEach, expect, test, vi } from 'vitest';
-import { page } from 'vitest/browser';
+import { page, userEvent } from 'vitest/browser';
 import { render } from 'vitest-browser-svelte';
 
 vi.mock('./call-telemetry', () => ({ CallTelemetry: vi.fn() }));
 vi.mock('$app/navigation', () => import('#lib/test-support/app-navigation.js'));
 
+import { setPreference } from '#lib/settings/preferences.svelte.js';
 import type { CallSession } from './call-session.svelte.js';
 import { idleTransportState, type CallParticipant } from './call-transport';
 import CallViewHarness from './CallViewHarness.test.svelte';
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  setPreference('callHideParticipantsWhenSharing', false);
+  vi.restoreAllMocks();
+});
 
 const track = { id: 'camera', muted: false, subscribed: true };
 const share = { id: 'share', muted: false, subscribed: true };
@@ -137,3 +141,34 @@ test.each([
     ).toBe(true);
   }
 );
+
+test('hiding user cards collapses the strip and expands the screen share to fill the focus stage', async () => {
+  await page.viewport(1200, 720);
+  const { container } = await render(CallViewHarness, {
+    session: activeCall({
+      nativeVideo: false,
+      participants: [{ identity: 'bob', camera: track, microphone: track, screenShare: share }],
+      watchedScreenShareIds: [share.id],
+    }),
+    members: [],
+    onOpenSettings: vi.fn(),
+  });
+  container.style.cssText = 'display:flex;width:1200px;height:720px';
+
+  const focus = container.querySelector<HTMLElement>('.focus');
+  const featured = container.querySelector<HTMLElement>('.featured');
+  if (!focus || !featured) throw new Error('focus view not rendered');
+
+  await expect.poll(() => container.querySelector('.strip')).not.toBeNull();
+  expect(featured.getBoundingClientRect().width).toBeLessThan(focus.getBoundingClientRect().width);
+
+  await userEvent.click(page.getByRole('button', { name: 'Hide participants' }));
+
+  await expect.poll(() => container.querySelector('.strip')).toBeNull();
+  await expect
+    .poll(() => Math.round(featured.getBoundingClientRect().width))
+    .toBe(Math.round(focus.getBoundingClientRect().width));
+
+  await userEvent.click(page.getByRole('button', { name: 'Show participants' }));
+  await expect.poll(() => container.querySelector('.strip')).not.toBeNull();
+});

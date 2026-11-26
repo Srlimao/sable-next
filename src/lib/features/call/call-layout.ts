@@ -58,6 +58,18 @@ export function callTiles(
   return tiles;
 }
 
+export function hasScreenShare(tiles: readonly CallTile[]): boolean {
+  return tiles.some((tile) => tile.source === 'screen');
+}
+
+export function visibleTiles(
+  tiles: readonly CallTile[],
+  hideParticipants: boolean
+): readonly CallTile[] {
+  if (!hideParticipants || !hasScreenShare(tiles)) return tiles;
+  return tiles.filter((tile) => tile.source === 'screen');
+}
+
 export function featuredTiles(tiles: readonly CallTile[], pinned: string | null): CallTile[] {
   if (pinned !== null) {
     const tile = tiles.find((candidate) => candidate.key === pinned);

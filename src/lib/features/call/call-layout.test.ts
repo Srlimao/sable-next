@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { bestGrid, callTiles, featuredTiles, presentParticipants, togglePin } from './call-layout';
+import {
+  bestGrid,
+  callTiles,
+  featuredTiles,
+  hasScreenShare,
+  presentParticipants,
+  togglePin,
+  visibleTiles,
+} from './call-layout';
 import type { CallParticipant } from './call-transport';
 
 const track = (muted = false) => ({ id: 't', muted, subscribed: true });
@@ -141,5 +149,51 @@ describe('togglePin', () => {
       pinned: 'legacy:other:screen',
       gridForced: false,
     });
+  });
+});
+
+describe('hasScreenShare', () => {
+  it('returns false when no active screen share tile exists', () => {
+    const tiles = callTiles([
+      { identity: 'me', local: true },
+      { identity: 'them', screenShare: track(true) },
+    ]);
+    expect(hasScreenShare(tiles)).toBe(false);
+  });
+
+  it('returns true for watched and unwatched screen shares', () => {
+    const unwatched = callTiles([{ identity: 'them', screenShare: track() }]);
+    const watched = callTiles([{ identity: 'them', screenShare: track() }], ['t']);
+    expect(hasScreenShare(unwatched)).toBe(true);
+    expect(hasScreenShare(watched)).toBe(true);
+  });
+});
+
+describe('visibleTiles', () => {
+  const self: CallParticipant = { identity: 'me', local: true, camera: track() };
+  const sharer: CallParticipant = { identity: 'them', screenShare: track() };
+  const otherSharer: CallParticipant = {
+    identity: 'other',
+    screenShare: { ...track(), id: 'other-s' },
+  };
+  const keys = (tiles: readonly { key: string }[]) => tiles.map((tile) => tile.key);
+
+  it('returns all tiles when hideParticipants is false', () => {
+    const tiles = callTiles([self, sharer], ['t']);
+    expect(keys(visibleTiles(tiles, false))).toEqual([
+      'legacy:me:camera',
+      'legacy:them:camera',
+      'legacy:them:screen',
+    ]);
+  });
+
+  it('returns all tiles when hideParticipants is true but no screen share is active', () => {
+    const tiles = callTiles([self, { identity: 'them' }]);
+    expect(keys(visibleTiles(tiles, true))).toEqual(['legacy:me:camera', 'legacy:them:camera']);
+  });
+
+  it('hides all camera tiles and keeps watched and unwatched screen shares', () => {
+    const tiles = callTiles([self, sharer, otherSharer], ['t']);
+    expect(keys(visibleTiles(tiles, true))).toEqual(['legacy:them:screen', 'legacy:other:screen']);
   });
 });

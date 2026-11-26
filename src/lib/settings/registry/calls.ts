@@ -1,3 +1,4 @@
+import EyeSlashIcon from 'phosphor-svelte/lib/EyeSlashIcon';
 import MicrophoneIcon from 'phosphor-svelte/lib/MicrophoneIcon';
 import MonitorIcon from 'phosphor-svelte/lib/MonitorIcon';
 import NetworkIcon from 'phosphor-svelte/lib/NetworkIcon';
@@ -226,6 +227,14 @@ export const callsCategory: SettingsCategory = {
       section: 'call-screens',
       icon: MonitorIcon,
       name: 'settings.callScreenPreview',
+      type: 'boolean',
+    },
+    {
+      key: 'callHideParticipantsWhenSharing',
+      section: 'call-screens',
+      icon: EyeSlashIcon,
+      name: 'settings.callHideParticipantsWhenSharing',
+      description: 'settings.callHideParticipantsWhenSharingHint',
       type: 'boolean',
     },
     {

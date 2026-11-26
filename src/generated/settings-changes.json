@@ -5,6 +5,7 @@
       "saturation",
       "showActiveThreadsInSidebar",
       "showEncryptionStatusIcon",
+      "callHideParticipantsWhenSharing",
       "matrixLinkSelector",
       "matrixLinkCustom"
     ],
