@@ -42,8 +42,10 @@
     isDialogOpen,
     isEditableTarget,
     matchesBinding,
+    matchesMouseBinding,
+    suppressMouseButton,
   } from '#lib/ui/shortcuts/binding.js';
-  import { bindingFor } from '#lib/ui/shortcuts/bindings.svelte.js';
+  import { bindingFor, shortcutCapture } from '#lib/ui/shortcuts/bindings.svelte.js';
   import { isMacPlatform } from '#lib/ui/shortcuts/global-shortcuts.js';
 
   import MessageContextMenu from '../messages/MessageContextMenu.svelte';
@@ -1196,7 +1198,8 @@
     void controller?.jumpTo(null, 'start', !shouldReduceMotion());
   }
   function onJumpShortcut(event: KeyboardEvent): void {
-    if (event.defaultPrevented || isComposingKey(event) || !active) return;
+    if (event.defaultPrevented || isComposingKey(event) || !active || shortcutCapture.active)
+      return;
     if (isEditableTarget(event.target) || isDialogOpen()) return;
     const mac = isMacPlatform();
     const pressed = (id: string): boolean => {
@@ -1208,6 +1211,24 @@
       jumpToMention();
     } else if (pressed('room.jumpBack') && returns.eventId !== null) {
       event.preventDefault();
+      jumpDown();
+    }
+  }
+  function onJumpMouseShortcut(event: MouseEvent): void {
+    if (event.defaultPrevented || event.button === 0 || !active || shortcutCapture.active) return;
+    if (isDialogOpen()) return;
+    const mac = isMacPlatform();
+    const pressed = (id: string): boolean => {
+      const binding = bindingFor(id);
+      return binding !== undefined && matchesMouseBinding(binding, event, mac);
+    };
+    if (pressed('room.nextMention') && mentions.pending.length > 0) {
+      event.preventDefault();
+      suppressMouseButton(event.button);
+      jumpToMention();
+    } else if (pressed('room.jumpBack') && returns.eventId !== null) {
+      event.preventDefault();
+      suppressMouseButton(event.button);
       jumpDown();
     }
   }
@@ -1277,6 +1298,7 @@
     onJumpShortcut(event);
     onEscape(event);
   }}
+  onmousedown={onJumpMouseShortcut}
 />
 
 <TimelineReadReceipt

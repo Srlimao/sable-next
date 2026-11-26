@@ -1199,7 +1199,8 @@
           shortcutsHelpState.open = true;
         },
         'call.toggleMute': (event) => {
-          if (event.repeat || callSession.desktopShortcutStatus === 'portal') return;
+          if (('repeat' in event && event.repeat) || callSession.desktopShortcutStatus === 'portal')
+            return;
           if (callSession.active && callSession.mediaReady) {
             void callSession.toggleMicrophone();
           }
@@ -1213,7 +1214,8 @@
           },
         },
         'call.toggleDeafen': (event) => {
-          if (event.repeat || callSession.desktopShortcutStatus === 'portal') return;
+          if (('repeat' in event && event.repeat) || callSession.desktopShortcutStatus === 'portal')
+            return;
           if (callSession.active) callSession.setDeafened(!callSession.deafened);
         },
         'call.toggleCamera': () => {

@@ -48,6 +48,10 @@ const KEY_NAMES: Record<string, [string, string, string]> = {
   '\\': ['Backslash', 'backslash', '\\'],
   ']': ['BracketRight', 'bracketright', ']'],
   "'": ['Quote', 'apostrophe', "'"],
+  mouse2: ['', '', 'mouse2'],
+  mouse3: ['', '', 'mouse3'],
+  mouse4: ['', '', 'mouse4'],
+  mouse5: ['', '', 'mouse5'],
 };
 
 export function nativeBinding(binding: DesktopCallShortcut, isMac: boolean) {
@@ -73,9 +77,9 @@ export function nativeBinding(binding: DesktopCallShortcut, isMac: boolean) {
   return {
     id: binding.id,
     description: binding.description,
-    hotkey: [...modifiers, key].join('+'),
+    hotkey: key ? [...modifiers, key].join('+') : '',
     passive: [...modifiers, passive].join('+'),
-    trigger: [...modifiers, trigger].join('+'),
+    trigger: trigger ? [...modifiers, trigger].join('+') : '',
   };
 }
 

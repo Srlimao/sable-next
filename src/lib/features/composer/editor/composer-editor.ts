@@ -35,11 +35,14 @@ import { enterInsertsNewline, noteKeyboardInput } from '#lib/settings/enter-key.
 import { preferences } from '#lib/settings/preferences.svelte.js';
 import {
   isComposingKey,
+  isMouseBinding,
   isNumpadEvent,
   matchesBinding,
+  matchesMouseBinding,
+  suppressMouseButton,
   toProseMirrorKey,
 } from '#lib/ui/shortcuts/binding.js';
-import { bindingFor } from '#lib/ui/shortcuts/bindings.svelte.js';
+import { bindingFor, shortcutCapture } from '#lib/ui/shortcuts/bindings.svelte.js';
 import { isMacPlatform } from '#lib/ui/shortcuts/global-shortcuts.js';
 import type { ShortcutId } from '#lib/ui/shortcuts/shortcuts.js';
 import type { AutocompleteQuery } from '../autocomplete';
@@ -102,7 +105,7 @@ function shortcutKeymap(commands: Partial<Record<ShortcutId, Command>>): Plugin 
         const map: Record<string, Command> = {};
         for (const [id, command] of Object.entries(commands)) {
           const binding = bindingFor(id);
-          if (!binding) continue;
+          if (!binding || isMouseBinding(binding)) continue;
           // ProseMirror keymaps only see event.key, so numpad keys would collide with their main-row twins.
           if (!isNumpadEvent(event)) map[toProseMirrorKey(binding)] = command;
           else if (matchesBinding(binding, event, isMacPlatform())) {
@@ -110,6 +113,20 @@ function shortcutKeymap(commands: Partial<Record<ShortcutId, Command>>): Plugin 
           }
         }
         return keydownHandler(map)(view, event);
+      },
+      handleDOMEvents: {
+        mousedown(view, event) {
+          if (event.defaultPrevented || event.button === 0 || shortcutCapture.active) return false;
+          const isMac = isMacPlatform();
+          for (const [id, command] of Object.entries(commands)) {
+            const binding = bindingFor(id);
+            if (!binding || !matchesMouseBinding(binding, event, isMac)) continue;
+            event.preventDefault();
+            suppressMouseButton(event.button);
+            return command(view.state, view.dispatch, view);
+          }
+          return false;
+        },
       },
     },
   });

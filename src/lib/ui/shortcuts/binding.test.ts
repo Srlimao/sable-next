@@ -2,11 +2,14 @@ import { describe, expect, test } from 'vitest';
 
 import {
   bindingFromEvent,
+  bindingFromMouseEvent,
   findShortcutConflicts,
   formatBinding,
   isEditableTarget,
   isDialogOpen,
+  isMouseBinding,
   matchesBinding,
+  matchesMouseBinding,
   parseBinding,
   toProseMirrorKey,
 } from './binding';
@@ -15,6 +18,17 @@ function event(overrides: Partial<Parameters<typeof matchesBinding>[1]> = {}) {
   return {
     key: 'a',
     code: 'KeyA',
+    ctrlKey: false,
+    metaKey: false,
+    altKey: false,
+    shiftKey: false,
+    ...overrides,
+  };
+}
+
+function mouseEvent(overrides: Partial<Parameters<typeof matchesMouseBinding>[1]> = {}) {
+  return {
+    button: 3,
     ctrlKey: false,
     metaKey: false,
     altKey: false,
@@ -249,4 +263,73 @@ test('Alt keeps the letter the layout types when it differs from the physical ke
   const azertyA = event({ key: 'a', code: 'KeyQ', altKey: true });
   expect(matchesBinding('alt+a', azertyA, false)).toBe(true);
   expect(matchesBinding('alt+q', azertyA, false)).toBe(false);
+});
+
+describe('secondary mouse button bindings', () => {
+  test('parses mouse button aliases to canonical tokens', () => {
+    expect(parseBinding('mousemiddle').key).toBe('mouse3');
+    expect(parseBinding('mouseright').key).toBe('mouse2');
+    expect(parseBinding('mousex1').key).toBe('mouse4');
+    expect(parseBinding('xbutton2').key).toBe('mouse5');
+    expect(isMouseBinding('mouse4')).toBe(true);
+    expect(isMouseBinding('alt+mouse2')).toBe(true);
+    expect(isMouseBinding('mod+k')).toBe(false);
+  });
+
+  test('matches secondary mouse buttons and their modifiers', () => {
+    expect(matchesMouseBinding('mouse3', mouseEvent({ button: 1 }), false)).toBe(true);
+    expect(matchesMouseBinding('mouse4', mouseEvent({ button: 3 }), false)).toBe(true);
+    expect(matchesMouseBinding('mouse5', mouseEvent({ button: 4 }), false)).toBe(true);
+    expect(matchesMouseBinding('mouse4', mouseEvent({ button: 4 }), false)).toBe(false);
+    expect(matchesMouseBinding('mouse4', mouseEvent({ button: 3, altKey: true }), false)).toBe(
+      false
+    );
+    expect(matchesMouseBinding('mod+mouse4', mouseEvent({ button: 3, ctrlKey: true }), false)).toBe(
+      true
+    );
+    expect(matchesMouseBinding('mod+mouse4', mouseEvent({ button: 3, metaKey: true }), true)).toBe(
+      true
+    );
+    expect(matchesMouseBinding('alt+mouse2', mouseEvent({ button: 2, altKey: true }), false)).toBe(
+      true
+    );
+    expect(matchesMouseBinding('mod+k', mouseEvent({ button: 3, ctrlKey: true }), false)).toBe(
+      false
+    );
+    expect(matchesBinding('mouse4', event({ key: 'mouse4', code: '' }), false)).toBe(false);
+    expect(matchesBinding('mouse4', event({ key: 'a', code: 'KeyA' }), false)).toBe(false);
+  });
+
+  test('records secondary mouse buttons while rejecting primary and unmodified right clicks', () => {
+    expect(bindingFromMouseEvent(mouseEvent({ button: 0 }), false)).toBeNull();
+    expect(bindingFromMouseEvent(mouseEvent({ button: 0, ctrlKey: true }), false)).toBeNull();
+    expect(bindingFromMouseEvent(mouseEvent({ button: 2 }), false)).toBeNull();
+    expect(bindingFromMouseEvent(mouseEvent({ button: 2, altKey: true }), false)).toBe(
+      'alt+mouse2'
+    );
+    expect(bindingFromMouseEvent(mouseEvent({ button: 1 }), false)).toBe('mouse3');
+    expect(bindingFromMouseEvent(mouseEvent({ button: 3 }), false)).toBe('mouse4');
+    expect(
+      bindingFromMouseEvent(mouseEvent({ button: 4, ctrlKey: true, shiftKey: true }), false)
+    ).toBe('mod+shift+mouse5');
+    expect(bindingFromMouseEvent(mouseEvent({ button: 3, metaKey: true }), true)).toBe(
+      'mod+mouse4'
+    );
+  });
+
+  test('formats mouse bindings for display and detects conflicts across aliases', () => {
+    expect(formatBinding('mouse3', false)).toBe('Mouse Middle');
+    expect(formatBinding('alt+mouse2', false)).toBe('Alt+Mouse Right');
+    expect(formatBinding('mod+mouse4', false)).toBe('Ctrl+Mouse 4');
+    expect(formatBinding('mod+shift+mouse5', true)).toBe('⌘+⇧+Mouse 5');
+
+    const conflicts = findShortcutConflicts(
+      [
+        { id: 'a', binding: 'mouse4' },
+        { id: 'b', binding: 'mousex1' },
+      ],
+      false
+    );
+    expect(conflicts).toHaveLength(1);
+  });
 });

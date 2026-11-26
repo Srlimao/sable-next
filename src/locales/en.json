@@ -4354,7 +4354,7 @@
     "editNewer": "Edit your next message",
     "nextMention": "Jump to the next unread mention",
     "jumpBack": "Go back after following a reply",
-    "pressKeys": "Press keys, Esc to cancel…",
+    "pressKeys": "Press keys or mouse button, Esc to cancel…",
     "conflict": "That combination is already used by “{{name}}”.",
     "resetOne": "Reset to default",
     "unbind": "Remove shortcut",

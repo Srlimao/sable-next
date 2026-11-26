@@ -246,7 +246,14 @@ async fn portal_shortcuts(
     let mut closed = session.receive_closed().await?;
     let shortcuts: Vec<_> = bindings
         .iter()
-        .map(|b| NewShortcut::new(&b.id, &b.description).preferred_trigger(b.trigger.as_str()))
+        .map(|b| {
+            let shortcut = NewShortcut::new(&b.id, &b.description);
+            if b.trigger.is_empty() {
+                shortcut
+            } else {
+                shortcut.preferred_trigger(b.trigger.as_str())
+            }
+        })
         .collect();
     let response = portal
         .bind_shortcuts(&session, &shortcuts, None, BindShortcutsOptions::default())
@@ -304,6 +311,12 @@ mod tests {
             "up",
             "return",
             "backspace",
+            "mouse3",
+            "mouse4",
+            "mouse5",
+            "CTRL+mouse2",
+            "SUPER+SHIFT+mouse4",
+            "ALT+mouse5",
         ] {
             assert!(
                 binding.parse::<handy_keys::Hotkey>().is_ok(),

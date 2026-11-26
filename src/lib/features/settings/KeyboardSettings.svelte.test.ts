@@ -2,6 +2,7 @@
 
 import { render, screen } from '@testing-library/svelte';
 import { userEvent } from '@testing-library/user-event';
+import { flushSync } from 'svelte';
 import { afterEach, expect, test, vi } from 'vitest';
 
 vi.mock('$app/state', () => import('#lib/test-support/app-state.js'));
@@ -49,4 +50,53 @@ test('removing a shortcut leaves it unbound until reset', async () => {
 
   await user.click(screen.getByRole('button', { name: 'shortcuts.resetOne' }));
   expect(bindingFor(first.id)).toBe(first.binding);
+});
+
+test('recording a secondary mouse button binds it and suppresses follow-up mouse defaults', async () => {
+  const user = userEvent.setup();
+  render(KeyboardSettings);
+  const [first] = SHORTCUTS;
+
+  const [recorder] = screen.getAllByRole('button', { pressed: false });
+  await user.click(recorder);
+  expect(recorder).toHaveAttribute('aria-pressed', 'true');
+
+  const down = new MouseEvent('mousedown', { button: 3, bubbles: true, cancelable: true });
+  window.dispatchEvent(down);
+  flushSync();
+  expect(down.defaultPrevented).toBe(true);
+  expect(bindingFor(first.id)).toBe('mouse4');
+  expect(recorder).toHaveAttribute('aria-pressed', 'false');
+  expect(recorder).toHaveTextContent('Mouse 4');
+
+  const up = new MouseEvent('mouseup', { button: 3, bubbles: true, cancelable: true });
+  window.dispatchEvent(up);
+  expect(up.defaultPrevented).toBe(true);
+});
+
+test('recording ignores unmodified right click but accepts modified right click', async () => {
+  const user = userEvent.setup();
+  render(KeyboardSettings);
+  const [first] = SHORTCUTS;
+
+  const [recorder] = screen.getAllByRole('button', { pressed: false });
+  await user.click(recorder);
+
+  const plainRight = new MouseEvent('mousedown', { button: 2, bubbles: true, cancelable: true });
+  window.dispatchEvent(plainRight);
+  flushSync();
+  expect(plainRight.defaultPrevented).toBe(false);
+  expect(recorder).toHaveAttribute('aria-pressed', 'true');
+
+  const altRight = new MouseEvent('mousedown', {
+    button: 2,
+    altKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  window.dispatchEvent(altRight);
+  flushSync();
+  expect(altRight.defaultPrevented).toBe(true);
+  expect(bindingFor(first.id)).toBe('alt+mouse2');
+  expect(recorder).toHaveTextContent('Alt+Mouse Right');
 });

@@ -1,3 +1,16 @@
+import {
+  MOUSE_DISPLAY_NAMES,
+  MOUSE_KEY_ALIASES,
+  mouseButtonForKey,
+  type MouseEventLike,
+} from './mouse-binding.js';
+
+export {
+  bindingFromMouseEvent,
+  suppressMouseButton,
+  type MouseEventLike,
+} from './mouse-binding.js';
+
 const KEY_ALIASES: Record<string, string> = {
   up: 'arrowup',
   down: 'arrowdown',
@@ -5,6 +18,7 @@ const KEY_ALIASES: Record<string, string> = {
   right: 'arrowright',
   esc: 'escape',
   space: ' ',
+  ...MOUSE_KEY_ALIASES,
 };
 
 export interface ParsedBinding {
@@ -110,8 +124,13 @@ function isNamedKey(key: string): boolean {
   return key.length > 1;
 }
 
+export function isMouseBinding(binding: string): boolean {
+  return mouseButtonForKey(parseBinding(binding).key) !== undefined;
+}
+
 export function matchesBinding(binding: string, event: KeyboardEventLike, isMac: boolean): boolean {
   const parsed = parseBinding(binding);
+  if (mouseButtonForKey(parsed.key) !== undefined) return false;
   const requiredCtrl = parsed.ctrl || (parsed.mod && !isMac);
   const requiredMeta = parsed.meta || (parsed.mod && isMac);
 
@@ -122,6 +141,26 @@ export function matchesBinding(binding: string, event: KeyboardEventLike, isMac:
   if (parsed.shift && !event.shiftKey) return false;
 
   return eventKey(event) === parsed.key;
+}
+
+export function matchesMouseBinding(
+  binding: string,
+  event: MouseEventLike,
+  isMac: boolean
+): boolean {
+  const parsed = parseBinding(binding);
+  const button = mouseButtonForKey(parsed.key);
+  if (button === undefined || event.button !== button) return false;
+
+  const requiredCtrl = parsed.ctrl || (parsed.mod && !isMac);
+  const requiredMeta = parsed.meta || (parsed.mod && isMac);
+
+  if (event.ctrlKey !== requiredCtrl) return false;
+  if (event.metaKey !== requiredMeta) return false;
+  if (event.altKey !== parsed.alt) return false;
+  if (event.shiftKey !== parsed.shift) return false;
+
+  return true;
 }
 
 export function isEditableTarget(target: EventTarget | null): boolean {
@@ -191,6 +230,7 @@ const DISPLAY_KEY_NAMES: Record<string, string> = {
   numsub: 'Num -',
   nummult: 'Num *',
   numdiv: 'Num /',
+  ...MOUSE_DISPLAY_NAMES,
 };
 
 export function formatBinding(binding: string, isMac: boolean): string {

@@ -103,8 +103,14 @@
   import { composerSchema } from './editor/schema';
   import { emoticonNode } from './editor/shortcodes';
   import type { BoardTab } from '#lib/ui/primitives/emote-board.js';
-  import { isDialogOpen, isEditableTarget, matchesBinding } from '#lib/ui/shortcuts/binding.js';
-  import { bindingFor } from '#lib/ui/shortcuts/bindings.svelte.js';
+  import {
+    isDialogOpen,
+    isEditableTarget,
+    matchesBinding,
+    matchesMouseBinding,
+    suppressMouseButton,
+  } from '#lib/ui/shortcuts/binding.js';
+  import { bindingFor, shortcutCapture } from '#lib/ui/shortcuts/bindings.svelte.js';
   import { isMacPlatform } from '#lib/ui/shortcuts/global-shortcuts.js';
   import type { ShortcutId } from '#lib/ui/shortcuts/shortcuts.js';
   import {
@@ -1294,23 +1300,29 @@
     ['composer.toggleGifPicker', 'gif'],
   ];
 
-  function canToggleBoard(event: KeyboardEvent): boolean {
+  function canToggleBoard(event: KeyboardEvent | MouseEvent): boolean {
     if (isDialogOpen()) return false;
     if (rowEl?.contains(event.target as Node | null)) return true;
-    if (isEditableTarget(event.target) || document.querySelector(MENU_SELECTOR) !== null)
-      return false;
+    if (document.querySelector(MENU_SELECTOR) !== null) return false;
+    if ('key' in event && isEditableTarget(event.target)) return false;
     return !lastFocusedRow?.isConnected || lastFocusedRow === rowEl;
   }
 
-  function toggleBoard(event: KeyboardEvent): boolean {
+  function toggleBoard(event: KeyboardEvent | MouseEvent): boolean {
     if (!boardOpen && !canToggleBoard(event)) return false;
 
     for (const [id, tab] of boardShortcuts) {
       const binding = bindingFor(id);
-      if (!binding || !matchesBinding(binding, event, isMacPlatform())) continue;
+      if (!binding) continue;
+      const matched =
+        'key' in event
+          ? matchesBinding(binding, event, isMacPlatform())
+          : matchesMouseBinding(binding, event, isMacPlatform());
+      if (!matched) continue;
       if (tab === 'gif' && !onSendGif) return false;
 
       event.preventDefault();
+      if ('button' in event) suppressMouseButton(event.button);
       if (boardOpen && boardTab === tab) boardOpen = false;
       else {
         if (!desktop) blurEditor();
@@ -1323,14 +1335,19 @@
   }
 
   function handleKeydown(event: KeyboardEvent): void {
-    if (readOnly || event.defaultPrevented) return;
+    if (readOnly || event.defaultPrevented || shortcutCapture.active) return;
     if (toggleBoard(event)) return;
     if (!shouldFocusComposer(event)) return;
 
     editor.focus();
   }
 
-  function stepReply(event: KeyboardEvent): void {
+  function handleMousedown(event: MouseEvent): void {
+    if (readOnly || event.defaultPrevented || event.button === 0 || shortcutCapture.active) return;
+    toggleBoard(event);
+  }
+
+  function stepReply(event: KeyboardEvent | MouseEvent): boolean {
     if (
       !onReplyStep ||
       panelOpen ||
@@ -1338,15 +1355,17 @@
       editingScheduled ||
       event.defaultPrevented
     )
-      return;
+      return false;
     const direction = replyStep(event);
-    if (!direction) return;
+    if (!direction) return false;
 
     event.preventDefault();
+    if ('button' in event) suppressMouseButton(event.button);
     onReplyStep(direction);
+    return true;
   }
 
-  function stepEdit(event: KeyboardEvent): void {
+  function stepEdit(event: KeyboardEvent | MouseEvent): boolean {
     if (
       !onEditLast ||
       !onEditNext ||
@@ -1356,13 +1375,15 @@
       (context && context.kind !== 'edit') ||
       (!context && (!empty || staged.length > 0))
     )
-      return;
+      return false;
     const direction = editStep(event);
-    if (!direction) return;
+    if (!direction) return false;
 
     event.preventDefault();
+    if ('button' in event) suppressMouseButton(event.button);
     if (direction === 'older') onEditLast(context?.eventId);
     else if (context) onEditNext(context.eventId);
+    return true;
   }
 
   function chooseOffer(choice: OfferChoice): void {
@@ -1464,6 +1485,7 @@
 
 <svelte:window
   onkeydown={handleKeydown}
+  onmousedown={handleMousedown}
   onmousemove={(event) => {
     if (pointerHidden && (event.movementX !== 0 || event.movementY !== 0)) pointerHidden = false;
   }}
@@ -1566,7 +1588,12 @@
           class={['composer-row', { short: shortLayout, 'formatting-open': formattingOpen }]}
           hidden={activeBotCommand !== null}
           bind:this={rowEl}
-          onmousedown={focusFromRow}
+          onmousedown={(event) => {
+            if (event.button !== 0 && !shortcutCapture.active) {
+              if (stepReply(event) || stepEdit(event)) return;
+            }
+            focusFromRow(event);
+          }}
           onfocusin={(event) => {
             lastFocusedRow = rowEl;
             if (keyboardResizesViewport && isEditableTarget(event.target))

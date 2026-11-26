@@ -1,6 +1,7 @@
 <script lang="ts">
   import ArrowCounterClockwiseIcon from 'phosphor-svelte/lib/ArrowCounterClockwiseIcon';
   import XIcon from 'phosphor-svelte/lib/XIcon';
+  import { on } from 'svelte/events';
 
   import { i18n } from '#lib/i18n.js';
   import { settingFocusId } from '#lib/settings/registry.js';
@@ -10,7 +11,12 @@
   import IconButton from '#lib/ui/primitives/IconButton.svelte';
   import SettingsRow from '#lib/ui/primitives/SettingsRow.svelte';
   import SettingsSection from '#lib/ui/primitives/SettingsSection.svelte';
-  import { bindingFromEvent, formatBinding } from '#lib/ui/shortcuts/binding.js';
+  import {
+    bindingFromEvent,
+    bindingFromMouseEvent,
+    formatBinding,
+    suppressMouseButton,
+  } from '#lib/ui/shortcuts/binding.js';
   import {
     conflictsWith,
     effectiveShortcuts,
@@ -33,8 +39,24 @@
   let rebound = $derived(SHORTCUTS.some((shortcut) => isRebound(shortcut.id)));
 
   $effect(() => {
-    shortcutCapture.active = capturing !== null;
+    const id = capturing;
+    shortcutCapture.active = id !== null;
+    if (id === null) return;
+    const offMousedown = on(
+      window,
+      'mousedown',
+      (event) => {
+        const binding = bindingFromMouseEvent(event, isMac);
+        if (binding === null) return;
+        event.preventDefault();
+        event.stopPropagation();
+        suppressMouseButton(event.button);
+        applyBinding(id, binding);
+      },
+      { capture: true }
+    );
     return () => {
+      offMousedown();
       shortcutCapture.active = false;
     };
   });
@@ -48,6 +70,18 @@
     return shortcut ? i18n.t(shortcut.labelKey) : id;
   }
 
+  function applyBinding(id: ShortcutId, binding: string): void {
+    const taken = conflictsWith(id, binding, isMac);
+    if (taken.length > 0) {
+      rejected = label(taken[0] as ShortcutId);
+      return;
+    }
+
+    rebind(id, binding);
+    capturing = null;
+    rejected = null;
+  }
+
   function capture(id: ShortcutId, event: KeyboardEvent): void {
     event.preventDefault();
     if (event.key === 'Escape') {
@@ -58,16 +92,7 @@
     }
     const binding = bindingFromEvent(event, isMac);
     if (binding === null) return;
-
-    const taken = conflictsWith(id, binding, isMac);
-    if (taken.length > 0) {
-      rejected = label(taken[0] as ShortcutId);
-      return;
-    }
-
-    rebind(id, binding);
-    capturing = null;
-    rejected = null;
+    applyBinding(id, binding);
   }
 </script>
 

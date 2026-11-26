@@ -67,6 +67,21 @@ test('normalizes custom bindings for native hotkeys and the Wayland portal', () 
     passive: 'CTRL+\\',
     trigger: 'CTRL+backslash',
   });
+  expect(nativeBinding({ ...talk, binding: 'mouse4' }, false)).toMatchObject({
+    hotkey: '',
+    passive: 'mouse4',
+    trigger: '',
+  });
+  expect(nativeBinding({ ...talk, binding: 'mod+shift+mouse5' }, true)).toMatchObject({
+    hotkey: '',
+    passive: 'SUPER+SHIFT+mouse5',
+    trigger: '',
+  });
+  expect(nativeBinding({ ...talk, binding: 'alt+mouse2' }, false)).toMatchObject({
+    hotkey: '',
+    passive: 'ALT+mouse2',
+    trigger: '',
+  });
 });
 
 test.each([

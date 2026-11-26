@@ -1,13 +1,14 @@
 import { afterEach, expect, test, vi } from 'vitest';
 
 import { registerGlobalShortcuts } from './global-shortcuts';
-import { rebind, resetAllBindings } from './bindings.svelte';
+import { rebind, resetAllBindings, shortcutCapture } from './bindings.svelte';
 
 let cleanup: (() => void) | undefined;
 
 afterEach(() => {
   cleanup?.();
   document.body.replaceChildren();
+  shortcutCapture.active = false;
   resetAllBindings();
   vi.restoreAllMocks();
 });
@@ -223,4 +224,92 @@ test('a disabled shortcut leaves the key to the browser', () => {
 
   expect(handler).not.toHaveBeenCalled();
   expect(event.defaultPrevented).toBe(false);
+});
+
+function mouse(
+  type: 'mousedown' | 'mouseup' | 'auxclick' | 'contextmenu',
+  init: MouseEventInit = {},
+  target: EventTarget = window
+) {
+  const event = new MouseEvent(type, {
+    button: 3,
+    bubbles: true,
+    cancelable: true,
+    ...init,
+  });
+  target.dispatchEvent(event);
+  return event;
+}
+
+test('a secondary mouse button fires an action shortcut and suppresses follow-up mouse defaults', () => {
+  const handler = vi.fn();
+  const auxListener = vi.fn();
+  document.addEventListener('auxclick', auxListener);
+  rebind('navigation.nextRoom', 'mouse4');
+  cleanup = registerGlobalShortcuts({ 'navigation.nextRoom': handler });
+
+  expect(mouse('mousedown', { button: 3 }).defaultPrevented).toBe(true);
+  expect(handler).toHaveBeenCalledOnce();
+  expect(mouse('mouseup', { button: 3 }).defaultPrevented).toBe(true);
+  expect(mouse('auxclick', { button: 3 }, document.body).defaultPrevented).toBe(true);
+  expect(auxListener).not.toHaveBeenCalled();
+
+  document.removeEventListener('auxclick', auxListener);
+});
+
+test('a modified right-click shortcut suppresses the context menu', () => {
+  const handler = vi.fn();
+  const menuListener = vi.fn();
+  document.addEventListener('contextmenu', menuListener);
+  rebind('navigation.nextRoom', 'alt+mouse2');
+  cleanup = registerGlobalShortcuts({ 'navigation.nextRoom': handler });
+
+  expect(mouse('mousedown', { button: 2, altKey: true }).defaultPrevented).toBe(true);
+  expect(handler).toHaveBeenCalledOnce();
+  expect(mouse('contextmenu', { button: 2, altKey: true }, document.body).defaultPrevented).toBe(
+    true
+  );
+  expect(menuListener).not.toHaveBeenCalled();
+  mouse('mouseup', { button: 2, altKey: true });
+
+  document.removeEventListener('contextmenu', menuListener);
+});
+
+test('push-to-talk holds and releases on a secondary mouse button, including over editable fields', () => {
+  const { press, release } = holdShortcut();
+  rebind('call.pushToTalk', 'mouse4');
+  const textarea = document.createElement('textarea');
+  document.body.append(textarea);
+
+  expect(mouse('mousedown', { button: 3 }, textarea).defaultPrevented).toBe(true);
+  expect(press).toHaveBeenCalledOnce();
+  expect(release).not.toHaveBeenCalled();
+
+  mouse('mouseup', { button: 4 });
+  expect(release).not.toHaveBeenCalled();
+
+  mouse('mouseup', { button: 3 });
+  expect(release).toHaveBeenCalledOnce();
+});
+
+test('releasing a required modifier ends a held mouse shortcut', () => {
+  const { press, release } = holdShortcut();
+  rebind('call.pushToTalk', 'alt+mouse4');
+
+  mouse('mousedown', { button: 3, altKey: true });
+  expect(press).toHaveBeenCalledOnce();
+
+  key('keyup', { key: 'Alt', code: 'AltLeft', ctrlKey: false, shiftKey: false, altKey: false });
+  expect(release).toHaveBeenCalledOnce();
+  mouse('mouseup', { button: 3 });
+});
+
+test('active shortcut capture blocks global mouse and keyboard shortcuts', () => {
+  const handler = vi.fn();
+  rebind('navigation.nextRoom', 'mouse4');
+  cleanup = registerGlobalShortcuts({ 'navigation.nextRoom': handler });
+  shortcutCapture.active = true;
+
+  expect(mouse('mousedown', { button: 3 }).defaultPrevented).toBe(false);
+  expect(handler).not.toHaveBeenCalled();
 });
