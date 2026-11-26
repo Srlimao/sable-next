@@ -164,6 +164,7 @@
   import { cycleRegion, focusRegion } from '#lib/ui/shortcuts/focus-regions.js';
   import { registerGlobalShortcuts } from '#lib/ui/shortcuts/global-shortcuts.js';
   import { registerDesktopCallShortcuts } from '#lib/features/call/desktop-shortcuts.svelte.js';
+  import { registerDesktopVoiceOverlay } from '#lib/features/call/desktop-overlay.svelte.js';
   import { paletteState, shortcutsHelpState } from '#lib/ui/shortcuts/palette-state.svelte.js';
   import FindOrJoinDialog from '#lib/features/room/discovery/FindOrJoinDialog.svelte';
   import { unreadRoomAtOffset, unreadRoomsByPriority } from '#lib/ui/shortcuts/room-jump.js';
@@ -216,6 +217,7 @@
   });
   provideCallSession(callSession);
   onMount(() => registerDesktopCallShortcuts(callSession));
+  onMount(() => registerDesktopVoiceOverlay(callSession, core));
   $effect(() => {
     if (!callSession.active) return;
     setKeepScreenOn(true);

@@ -33,6 +33,7 @@ export type ShortcutId =
   | 'call.toggleScreenShare'
   | 'call.hangUp'
   | 'call.pushToTalk'
+  | 'call.toggleOverlay'
   | 'composer.strong'
   | 'composer.em'
   | 'composer.underline'
@@ -279,6 +280,13 @@ export const SHORTCUTS: readonly ShortcutDefinition[] = [
     labelKey: 'shortcuts.pushToTalk',
     category: 'call',
     binding: 'mod+shift+t',
+    allowInEditable: true,
+  },
+  {
+    id: 'call.toggleOverlay',
+    labelKey: 'shortcuts.toggleOverlay',
+    category: 'call',
+    binding: 'shift+`',
     allowInEditable: true,
   },
   {

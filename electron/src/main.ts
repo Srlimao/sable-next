@@ -40,6 +40,9 @@ import type {
 import { deepLinksIn, deepLinkSchemes } from './deep-links';
 import { AuthLoopback } from './auth-loopback';
 import { CallShortcuts, validBindings } from './call-shortcuts';
+import { VoiceOverlayManager } from './voice-overlay';
+import { sanitizeOverlayConfig, sanitizeOverlayState } from './voice-overlay-layout';
+import type { VoiceOverlayAction } from '../../src/lib/platform/voice-overlay-types';
 import { autostartAvailable, setLaunchAtLogin } from './autostart';
 import { installMethod } from './install-method';
 import { registerContextMenu } from './context-menu';
@@ -83,7 +86,18 @@ declare const __SABLE_APP_VERSION__: string;
 ignoreBrokenPipes([process.stdout, process.stderr]);
 
 const IDENTIFIER = process.env.SABLE_IDENTIFIER ?? __SABLE_IDENTIFIER__;
+const voiceOverlay = new VoiceOverlayManager({
+  onAction: (action) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('sable-voice-overlay-action', action);
+    }
+  },
+});
 const callShortcuts = new CallShortcuts((event) => {
+  if ('id' in event && event.id === 'overlay') {
+    if (event.pressed) voiceOverlay.toggleLock();
+    return;
+  }
   if (mainWindow && !mainWindow.isDestroyed())
     mainWindow.webContents.send('sable-call-shortcut', event);
 });
@@ -229,7 +243,26 @@ function bundleReplaced(): boolean {
 }
 
 async function serveApp(request: Request): Promise<Response> {
-  const path = resolve(distDir, `.${decodeURIComponent(new URL(request.url).pathname)}`);
+  const { pathname } = new URL(request.url);
+  if (
+    pathname === '/__sable_overlay__/overlay.html' ||
+    pathname === '/__sable_overlay__/overlay-renderer.js'
+  ) {
+    const file = join(
+      __dirname,
+      pathname === '/__sable_overlay__/overlay.html' ? 'overlay.html' : 'overlay-renderer.js'
+    );
+    const type = file.endsWith('.html')
+      ? 'text/html; charset=utf-8'
+      : 'text/javascript; charset=utf-8';
+    const headers = new Headers({
+      'Content-Type': type,
+      'Content-Security-Policy':
+        "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src data:;",
+    });
+    return new Response(Readable.toWeb(createReadStream(file)) as ReadableStream, { headers });
+  }
+  const path = resolve(distDir, `.${decodeURIComponent(pathname)}`);
   const fromDist = relative(distDir, path);
   const inside = !fromDist.startsWith('..') && !isAbsolute(fromDist);
   const entry = inside ? await stat(path).catch(() => undefined) : undefined;
@@ -543,6 +576,76 @@ ipcMain.handle('sable-call-shortcuts', (event, bindings: unknown) => {
   }
 });
 
+function validOverlayAction(value: unknown): value is VoiceOverlayAction {
+  if (typeof value !== 'object' || value === null) return false;
+  const action = value as Record<string, unknown>;
+  if (
+    action.type === 'toggle-mute' ||
+    action.type === 'toggle-deafen' ||
+    action.type === 'hang-up' ||
+    action.type === 'lock'
+  ) {
+    return true;
+  }
+  return (
+    action.type === 'move' &&
+    typeof action.anchorX === 'number' &&
+    Number.isFinite(action.anchorX) &&
+    typeof action.anchorY === 'number' &&
+    Number.isFinite(action.anchorY)
+  );
+}
+
+ipcMain.handle('sable-voice-overlay-apps', (event) => {
+  if (!isAppFrame(event.senderFrame) || event.sender !== mainWindow?.webContents) return [];
+  return voiceOverlay.listRunningApps();
+});
+
+ipcMain.on('sable-voice-overlay-config', (event, rawConfig: unknown, shortcutLabel: unknown) => {
+  if (!isAppFrame(event.senderFrame) || event.sender !== mainWindow?.webContents) return;
+  const config = sanitizeOverlayConfig(rawConfig);
+  if (!config) return;
+  voiceOverlay.updateConfig(
+    config,
+    typeof shortcutLabel === 'string' ? shortcutLabel.slice(0, 64) : undefined
+  );
+});
+
+ipcMain.on('sable-voice-overlay-state', (event, rawState: unknown) => {
+  if (!isAppFrame(event.senderFrame) || event.sender !== mainWindow?.webContents) return;
+  const state = sanitizeOverlayState(rawState);
+  if (state) voiceOverlay.updateState(state);
+});
+
+ipcMain.on('sable-voice-overlay-toggle-lock', (event) => {
+  if (!isAppFrame(event.senderFrame) || event.sender !== mainWindow?.webContents) return;
+  voiceOverlay.toggleLock();
+});
+
+ipcMain.on('sable-overlay-action', (event, action: unknown) => {
+  if (!voiceOverlay.isOverlaySender(event.sender) || !validOverlayAction(action)) return;
+  voiceOverlay.handleAction(action);
+});
+
+ipcMain.on('sable-overlay-ready', (event) => {
+  if (!voiceOverlay.isOverlaySender(event.sender)) return;
+  voiceOverlay.handleRendererReady();
+});
+
+ipcMain.on('sable-overlay-size', (event, size: unknown) => {
+  if (!voiceOverlay.isOverlaySender(event.sender) || typeof size !== 'object' || size === null)
+    return;
+  const { width, height } = size as Record<string, unknown>;
+  if (
+    typeof width === 'number' &&
+    Number.isFinite(width) &&
+    typeof height === 'number' &&
+    Number.isFinite(height)
+  ) {
+    voiceOverlay.handleWidgetSize(width, height);
+  }
+});
+
 ipcMain.handle('sable-apply-window-settings', (event, value: unknown) => {
   if (!isAppFrame(event.senderFrame)) return null;
   desktopWindowSettings = sanitizeDesktopWindowSettings(value);
@@ -605,6 +708,7 @@ function createWindow(): BrowserWindow {
         ...(supportsAutoUpdate() ? [] : ['--sable-disable-auto-update']),
         ...(screenAudioAvailable ? ['--sable-screen-audio'] : []),
         ...(autostartAvailable() ? ['--sable-autostart'] : []),
+        ...(voiceOverlay.available ? ['--sable-voice-overlay'] : []),
       ],
     },
   });
@@ -637,6 +741,7 @@ function createWindow(): BrowserWindow {
     if (mainWindow !== window) return;
     screenAudio.stop();
     callShortcuts.stop();
+    voiceOverlay.stop();
     mainWindow = null;
     pageListening = false;
   });
@@ -706,10 +811,12 @@ function createWindow(): BrowserWindow {
     cancelPicks();
     screenAudio.stop();
     callShortcuts.stop();
+    voiceOverlay.stop();
   });
   window.webContents.on('render-process-gone', (_event, details) => {
     screenAudio.stop();
     callShortcuts.stop();
+    voiceOverlay.stop();
     if (details.reason === 'clean-exit' || quitting) return;
     const now = Date.now();
     if (now - lastCrashReload < CRASH_RELOAD_INTERVAL_MS) return;
@@ -948,6 +1055,7 @@ if (!app.requestSingleInstanceLock()) {
     if (!quitting) {
       quitting = true;
       callShortcuts.stop();
+      voiceOverlay.stop();
       screenAudio.stop();
       if (mainWindow && !mainWindow.isDestroyed()) rememberWindowState(mainWindow);
       persistWindowState();

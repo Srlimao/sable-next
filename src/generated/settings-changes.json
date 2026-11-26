@@ -6,6 +6,11 @@
       "showActiveThreadsInSidebar",
       "showEncryptionStatusIcon",
       "callHideParticipantsWhenSharing",
+      "callVoiceOverlay",
+      "callVoiceOverlayDisplay",
+      "callVoiceOverlayNames",
+      "callVoiceOverlayAvatarSize",
+      "callVoiceOverlayOpacity",
       "matrixLinkSelector",
       "matrixLinkCustom"
     ],

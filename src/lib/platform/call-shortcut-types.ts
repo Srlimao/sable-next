@@ -1,4 +1,4 @@
-export type CallShortcutId = 'talk' | 'mute' | 'deafen';
+export type CallShortcutId = 'talk' | 'mute' | 'deafen' | 'overlay';
 
 export interface DesktopCallShortcut {
   id: CallShortcutId;

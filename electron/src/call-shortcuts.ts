@@ -83,7 +83,7 @@ export function nativeBinding(binding: DesktopCallShortcut, isMac: boolean) {
   };
 }
 
-const SHORTCUT_IDS: unknown[] = ['talk', 'mute', 'deafen'] satisfies CallShortcutId[];
+const SHORTCUT_IDS: unknown[] = ['talk', 'mute', 'deafen', 'overlay'] satisfies CallShortcutId[];
 
 export function validBindings(value: unknown): value is DesktopCallShortcut[] {
   if (!Array.isArray(value) || value.length > SHORTCUT_IDS.length) return false;

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
@@ -60,6 +60,7 @@ await build({
   entryPoints: {
     main: join(here, 'src/main.ts'),
     preload: join(here, 'src/preload.ts'),
+    'overlay-preload': join(here, 'src/overlay-preload.ts'),
     'core-host': join(here, 'src/core-host.ts'),
     'audiofox-host': join(here, 'src/audiofox-host.ts'),
   },
@@ -82,3 +83,45 @@ await build({
   },
   sourcemap: true,
 });
+
+await build({
+  entryPoints: {
+    'overlay-renderer': join(here, 'src/overlay-renderer.ts'),
+  },
+  outdir: out,
+  bundle: true,
+  platform: 'browser',
+  format: 'iife',
+  target: 'chrome130',
+  sourcemap: true,
+});
+
+writeFileSync(
+  join(out, 'overlay.html'),
+  `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src data:;"
+    />
+    <title>Sable Voice Overlay</title>
+    <style>
+      html, body, #root {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script src="./overlay-renderer.js"></script>
+  </body>
+</html>
+`
+);

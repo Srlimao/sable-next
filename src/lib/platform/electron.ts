@@ -9,6 +9,12 @@ import type { ScreenAudioChoice } from './screen-audio-stream';
 import type { ScreenAudioListing } from './screen-audio-types';
 import type { DesktopWindowSettings, DesktopWindowState } from './window-decorations';
 import type { DesktopCallShortcut, DesktopCallShortcutEvent } from './call-shortcut-types';
+import type {
+  VoiceOverlayAction,
+  VoiceOverlayConfig,
+  VoiceOverlayRunningApp,
+  VoiceOverlayState,
+} from './voice-overlay-types';
 
 export interface ElectronSettings {
   hardwareAcceleration: boolean;
@@ -31,6 +37,12 @@ export interface ElectronBridge {
   platform: string;
   screenAudioAvailable: boolean;
   autostartAvailable: boolean;
+  voiceOverlayAvailable?: boolean;
+  listVoiceOverlayApps?(): Promise<VoiceOverlayRunningApp[]>;
+  updateVoiceOverlayConfig?(config: VoiceOverlayConfig, shortcutLabel: string): void;
+  updateVoiceOverlayState?(state: VoiceOverlayState): void;
+  toggleVoiceOverlayLock?(): void;
+  onVoiceOverlayAction?(callback: (action: VoiceOverlayAction) => void): () => void;
   setCallShortcuts(bindings: DesktopCallShortcut[]): Promise<void>;
   onCallShortcut(callback: (event: DesktopCallShortcutEvent) => void): () => void;
   setBadge(count: number, overlay: string | null): Promise<void>;

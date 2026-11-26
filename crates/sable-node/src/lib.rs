@@ -6,6 +6,8 @@
 
 #[cfg(windows)]
 mod screen_audio;
+#[cfg(windows)]
+mod voice_overlay;
 
 mod call_shortcuts;
 #[cfg(target_os = "linux")]

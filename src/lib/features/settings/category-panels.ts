@@ -10,6 +10,7 @@ import AppIconSettings from '#lib/features/settings/AppIconSettings.svelte';
 import CallCompatibilityDebug from '#lib/features/settings/CallCompatibilityDebug.svelte';
 import CallDeviceSettings from '#lib/features/call/CallDeviceSettings.svelte';
 import CallServiceSettings from '#lib/features/call/CallServiceSettings.svelte';
+import VoiceOverlaySettings from '#lib/features/call/VoiceOverlaySettings.svelte';
 import ComposerButtons from '#lib/features/settings/ComposerButtons.svelte';
 import ComposerEnterSetting from '#lib/features/settings/ComposerEnterSetting.svelte';
 import CustomThemes from '#lib/features/settings/CustomThemes.svelte';
@@ -71,6 +72,7 @@ export const panelComponents: Partial<Record<string, Component>> = {
   'notification-troubleshoot': NotificationTroubleshooter,
   'call-devices': CallDeviceSettings,
   'call-service': CallServiceSettings,
+  'call-overlay': VoiceOverlaySettings,
   'call-compat': CallCompatibilityDebug,
   'sound-volumes': SoundVolumeSettings,
   'media-preview-privacy': MediaPreviewPrivacy,

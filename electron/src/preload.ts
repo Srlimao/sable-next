@@ -10,6 +10,12 @@ import type {
   DesktopCallShortcut,
   DesktopCallShortcutEvent,
 } from '../../src/lib/platform/call-shortcut-types';
+import type {
+  VoiceOverlayAction,
+  VoiceOverlayConfig,
+  VoiceOverlayRunningApp,
+  VoiceOverlayState,
+} from '../../src/lib/platform/voice-overlay-types';
 
 interface ScreenShareCandidate {
   id: string;
@@ -50,6 +56,27 @@ contextBridge.exposeInMainWorld('sableElectron', {
   platform: process.platform,
   screenAudioAvailable: process.argv.includes('--sable-screen-audio'),
   autostartAvailable: process.argv.includes('--sable-autostart'),
+  voiceOverlayAvailable: process.argv.includes('--sable-voice-overlay'),
+  listVoiceOverlayApps: () =>
+    ipcRenderer.invoke('sable-voice-overlay-apps') as Promise<VoiceOverlayRunningApp[]>,
+  updateVoiceOverlayConfig: (config: VoiceOverlayConfig, shortcutLabel: string) => {
+    ipcRenderer.send('sable-voice-overlay-config', config, shortcutLabel);
+  },
+  updateVoiceOverlayState: (state: VoiceOverlayState) => {
+    ipcRenderer.send('sable-voice-overlay-state', state);
+  },
+  toggleVoiceOverlayLock: () => {
+    ipcRenderer.send('sable-voice-overlay-toggle-lock');
+  },
+  onVoiceOverlayAction: (callback: (action: VoiceOverlayAction) => void) => {
+    const listener = (_event: IpcRendererEvent, action: VoiceOverlayAction) => {
+      callback(action);
+    };
+    ipcRenderer.on('sable-voice-overlay-action', listener);
+    return () => {
+      ipcRenderer.removeListener('sable-voice-overlay-action', listener);
+    };
+  },
   setBadge: (count: number, overlay: string | null) =>
     ipcRenderer.invoke('sable-badge', count, overlay) as Promise<void>,
   requestAttention: () => {

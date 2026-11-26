@@ -15,6 +15,11 @@ import {
   hardwareVideoEncodeDefault,
 } from '#lib/platform/window-decorations.js';
 import { isNativeMobile } from '#lib/platform/os.js';
+import {
+  VOICE_OVERLAY_AVATAR_SIZES,
+  VOICE_OVERLAY_DISPLAY_MODES,
+  VOICE_OVERLAY_NAME_MODES,
+} from '#lib/platform/voice-overlay-types.js';
 import type { BadgeNotificationMode } from '#lib/rooms/unread.js';
 
 export type { BadgeNotificationMode };
@@ -514,6 +519,14 @@ const SETTINGS = {
   callScreenFramerate: choice(CALL_SCREEN_FRAMERATES, '30'),
   callScreenCodec: choice(CALL_VIDEO_CODECS, 'vp8'),
   callSimulcast: toggle(true),
+  callVoiceOverlay: toggle(false, { device: true }),
+  callVoiceOverlayDisplay: choice(VOICE_OVERLAY_DISPLAY_MODES, 'always', { device: true }),
+  callVoiceOverlayNames: choice(VOICE_OVERLAY_NAME_MODES, 'always', { device: true }),
+  callVoiceOverlayAvatarSize: choice(VOICE_OVERLAY_AVATAR_SIZES, 'compact', { device: true }),
+  callVoiceOverlayOpacity: range(0.2, 1.0, 0.85, { device: true }),
+  callVoiceOverlayAnchorX: range(0, 1, 0.02, { device: true }),
+  callVoiceOverlayAnchorY: range(0, 1, 0.04, { device: true }),
+  callVoiceOverlayApps: text('[]', { device: true }),
 
   /** Empty falls back to `config.json`; see `hasCompleteOverride`. */
   pushGatewayUrl: text('', { device: true }),

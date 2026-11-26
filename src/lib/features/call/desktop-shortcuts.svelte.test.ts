@@ -17,6 +17,7 @@ afterEach(() => {
   shortcutCapture.active = false;
   resetAllBindings();
   setPreference('callGlobalShortcuts', true);
+  setPreference('callVoiceOverlay', false);
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   document.body.replaceChildren();
@@ -119,6 +120,40 @@ test('a portal or registration failure is exposed in the call UI', () => {
   expect(session.desktopShortcutStatus).toBe('error');
   receive({ status: 'ready', backend: 'passive' });
   expect(session.desktopShortcutStatus).toBe('passive');
+});
+
+test('registers the overlay lock shortcut when voice overlay is enabled', () => {
+  const { setCallShortcuts } = setup();
+  expect(setCallShortcuts.mock.calls.at(-1)?.[0].some((b) => b.id === 'overlay')).toBe(false);
+
+  vi.stubGlobal('sableElectron', {
+    voiceOverlayAvailable: true,
+    setCallShortcuts,
+    onCallShortcut: () => vi.fn(),
+  });
+  setPreference('callVoiceOverlay', true);
+  flushSync();
+
+  stop?.();
+  stop = undefined;
+  const session = $state({
+    active: true,
+    lifecycle: 'active',
+    mediaReady: true,
+    listenOnly: false,
+    inputMode: 'push-to-talk',
+    desktopShortcutStatus: 'inactive',
+    setTalking: vi.fn(async () => {}),
+    deafened: false,
+    toggleMicrophone: vi.fn(async () => {}),
+    setDeafened: vi.fn(),
+  });
+  stop = registerDesktopCallShortcuts(session as unknown as CallSession);
+  flushSync();
+
+  expect(setCallShortcuts).toHaveBeenLastCalledWith(
+    expect.arrayContaining([expect.objectContaining({ id: 'overlay', binding: 'shift+`' })])
+  );
 });
 
 test('typing in Sable ignores portal presses without re-registering native shortcuts', () => {

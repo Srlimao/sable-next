@@ -6,11 +6,13 @@ import { bindingFor, shortcutCapture } from '#lib/ui/shortcuts/bindings.svelte.j
 import type { CallShortcutId, DesktopCallShortcut } from '#lib/platform/call-shortcut-types.js';
 import type { ShortcutId } from '#lib/ui/shortcuts/shortcuts.js';
 import type { CallSession } from './call-session.svelte';
+import { voiceOverlayPreview } from './voice-overlay-preview.svelte.js';
 
 const GLOBAL_SHORTCUTS: Record<CallShortcutId, { shortcut: ShortcutId; label: string }> = {
   talk: { shortcut: 'call.pushToTalk', label: 'shortcuts.pushToTalk' },
   mute: { shortcut: 'call.toggleMute', label: 'shortcuts.toggleMute' },
   deafen: { shortcut: 'call.toggleDeafen', label: 'shortcuts.toggleDeafen' },
+  overlay: { shortcut: 'call.toggleOverlay', label: 'shortcuts.toggleOverlay' },
 };
 
 export function registerDesktopCallShortcuts(session: CallSession): () => void {
@@ -30,7 +32,7 @@ export function registerDesktopCallShortcuts(session: CallSession): () => void {
       if (event.pressed && (!enabled || shortcutCapture.active || isEditing())) return;
       if (event.id === 'talk') void session.setTalking(event.pressed, 'desktop');
       else if (event.pressed && event.id === 'mute') void session.toggleMicrophone();
-      else if (event.pressed) session.setDeafened(!session.deafened);
+      else if (event.pressed && event.id === 'deafen') session.setDeafened(!session.deafened);
     });
 
     $effect(() => {
@@ -40,6 +42,11 @@ export function registerDesktopCallShortcuts(session: CallSession): () => void {
         !session.listenOnly &&
         preferences.callGlobalShortcuts &&
         !shortcutCapture.active;
+      const overlayEnabled =
+        bridge.voiceOverlayAvailable === true &&
+        preferences.callVoiceOverlay &&
+        (session.active || voiceOverlayPreview.active) &&
+        !shortcutCapture.active;
       const bindings: DesktopCallShortcut[] = [];
       if (enabled) {
         for (const id of ['talk', 'mute', 'deafen'] as const) {
@@ -48,6 +55,11 @@ export function registerDesktopCallShortcuts(session: CallSession): () => void {
           const binding = bindingFor(shortcut);
           if (binding) bindings.push({ id, binding, description: i18n.t(label) });
         }
+      }
+      if (overlayEnabled) {
+        const { shortcut, label } = GLOBAL_SHORTCUTS.overlay;
+        const binding = bindingFor(shortcut);
+        if (binding) bindings.push({ id: 'overlay', binding, description: i18n.t(label) });
       }
       session.desktopShortcutStatus = 'inactive';
       void bridge.setCallShortcuts(bindings).catch(() => {

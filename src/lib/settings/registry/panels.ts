@@ -1,5 +1,6 @@
 import { hasNativeCalls } from '#lib/platform/calls.js';
 import { deliversDeepLinks } from '#lib/platform/deep-links.js';
+import { electronBridge } from '#lib/platform/electron.js';
 import { isAndroid, isNativeMobile, supportsTouch } from '#lib/platform/os.js';
 import { presenceSharing } from '#lib/rooms/presence-sharing.svelte.js';
 import { preferences } from '../preferences.svelte';
@@ -222,6 +223,18 @@ export const settingsPanels: Record<string, SettingsPanelDefinition[]> = {
         ['call-compat-sticky', 'settings.callCompatSticky'],
         ['call-compat-delayed', 'settings.callCompatDelayed'],
         ['call-compat-transports', 'settings.callCompatTransports'],
+      ]),
+    },
+    {
+      id: 'call-overlay',
+      section: 'call-overlay',
+      supported: () => electronBridge()?.voiceOverlayAvailable === true,
+      targets: targets([
+        [
+          'call-overlay-apps',
+          'settings.callVoiceOverlayAppsTitle',
+          'settings.callVoiceOverlayAppsHint',
+        ],
       ]),
     },
   ],

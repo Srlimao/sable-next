@@ -1,11 +1,12 @@
 import EyeSlashIcon from 'phosphor-svelte/lib/EyeSlashIcon';
+import GameControllerIcon from 'phosphor-svelte/lib/GameControllerIcon';
 import MicrophoneIcon from 'phosphor-svelte/lib/MicrophoneIcon';
 import MonitorIcon from 'phosphor-svelte/lib/MonitorIcon';
 import NetworkIcon from 'phosphor-svelte/lib/NetworkIcon';
 import PhoneIcon from 'phosphor-svelte/lib/PhoneIcon';
 import SpeakerHighIcon from 'phosphor-svelte/lib/SpeakerHighIcon';
 import { hasNativeCalls } from '#lib/platform/calls.js';
-import { isElectron } from '#lib/platform/electron.js';
+import { electronBridge, isElectron } from '#lib/platform/electron.js';
 import {
   CALL_SCREEN_FRAMERATES,
   CALL_VIDEO_BITRATES,
@@ -35,6 +36,8 @@ const callCodecOptions: SettingOption[] = CALL_VIDEO_CODECS.map((value) =>
     : { value, label: value === 'h264' ? 'H.264' : value.toUpperCase(), literal: true }
 );
 
+const hasVoiceOverlay = () => electronBridge()?.voiceOverlayAvailable === true;
+
 export const callsCategory: SettingsCategory = {
   id: 'calls',
   name: 'settings.callsTitle',
@@ -46,6 +49,7 @@ export const callsCategory: SettingsCategory = {
     { id: 'ringing', name: 'settings.groups.ringing' },
     { id: 'call-button', name: 'settings.groups.callButton' },
     { id: 'call-screens', name: 'settings.groups.callScreens' },
+    { id: 'call-overlay', name: 'settings.groups.callOverlay' },
     { id: 'call-service', name: 'settings.callServiceTitle' },
     { id: 'call-compat', name: 'settings.groups.callCompat' },
   ],
@@ -236,6 +240,65 @@ export const callsCategory: SettingsCategory = {
       name: 'settings.callHideParticipantsWhenSharing',
       description: 'settings.callHideParticipantsWhenSharingHint',
       type: 'boolean',
+    },
+    {
+      key: 'callVoiceOverlay',
+      section: 'call-overlay',
+      icon: GameControllerIcon,
+      name: 'settings.callVoiceOverlay',
+      description: 'settings.callVoiceOverlayHint',
+      type: 'boolean',
+      supported: hasVoiceOverlay,
+    },
+    {
+      key: 'callVoiceOverlayDisplay',
+      section: 'call-overlay',
+      icon: GameControllerIcon,
+      name: 'settings.callVoiceOverlayDisplay',
+      type: 'select',
+      gatedBy: 'callVoiceOverlay',
+      supported: hasVoiceOverlay,
+      options: [
+        { value: 'always', label: 'settings.callVoiceOverlayDisplayAlways' },
+        { value: 'speaking', label: 'settings.callVoiceOverlayDisplaySpeaking' },
+      ],
+    },
+    {
+      key: 'callVoiceOverlayNames',
+      section: 'call-overlay',
+      icon: GameControllerIcon,
+      name: 'settings.callVoiceOverlayNames',
+      type: 'select',
+      gatedBy: 'callVoiceOverlay',
+      supported: hasVoiceOverlay,
+      options: [
+        { value: 'always', label: 'settings.callVoiceOverlayNamesAlways' },
+        { value: 'speaking', label: 'settings.callVoiceOverlayNamesSpeaking' },
+        { value: 'never', label: 'settings.callVoiceOverlayNamesNever' },
+      ],
+    },
+    {
+      key: 'callVoiceOverlayAvatarSize',
+      section: 'call-overlay',
+      icon: GameControllerIcon,
+      name: 'settings.callVoiceOverlayAvatarSize',
+      type: 'select',
+      gatedBy: 'callVoiceOverlay',
+      supported: hasVoiceOverlay,
+      options: [
+        { value: 'compact', label: 'settings.callVoiceOverlayAvatarCompact' },
+        { value: 'large', label: 'settings.callVoiceOverlayAvatarLarge' },
+      ],
+    },
+    {
+      key: 'callVoiceOverlayOpacity',
+      section: 'call-overlay',
+      icon: GameControllerIcon,
+      name: 'settings.callVoiceOverlayOpacity',
+      type: 'range',
+      step: 0.05,
+      gatedBy: 'callVoiceOverlay',
+      supported: hasVoiceOverlay,
     },
     {
       key: 'callMode',

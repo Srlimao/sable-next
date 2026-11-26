@@ -32,6 +32,12 @@ futures-util.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 sable-loopback = { path = "../sable-loopback", version = "0.1.0" }
+windows = { version = "0.62.2", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Dwm",
+  "Win32_System_Threading",
+  "Win32_UI_WindowsAndMessaging",
+] }
 
 [build-dependencies]
 napi-build = "2.6.0"
