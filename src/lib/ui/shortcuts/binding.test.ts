@@ -7,10 +7,12 @@ import {
   formatBinding,
   isEditableTarget,
   isDialogOpen,
+  isModifierBinding,
   isMouseBinding,
   matchesBinding,
   matchesMouseBinding,
   parseBinding,
+  standaloneModifierFromEvent,
   toProseMirrorKey,
 } from './binding';
 
@@ -331,5 +333,151 @@ describe('secondary mouse button bindings', () => {
       false
     );
     expect(conflicts).toHaveLength(1);
+  });
+});
+
+describe('standalone modifier key bindings', () => {
+  test('parses standalone modifier tokens and aliases into key', () => {
+    expect(parseBinding('ctrl')).toEqual({
+      key: 'ctrl',
+      mod: false,
+      ctrl: false,
+      meta: false,
+      alt: false,
+      shift: false,
+    });
+    expect(parseBinding('rctrl').key).toBe('ctrlright');
+    expect(parseBinding('ctrlleft').key).toBe('ctrlleft');
+    expect(parseBinding('altgr').key).toBe('altright');
+    expect(parseBinding('altleft').key).toBe('altleft');
+    expect(parseBinding('lshift').key).toBe('shiftleft');
+    expect(parseBinding('rshift').key).toBe('shiftright');
+    expect(parseBinding('lmeta').key).toBe('metaleft');
+    expect(parseBinding('rmeta').key).toBe('metaright');
+    expect(parseBinding('mod').key).toBe('mod');
+
+    expect(isModifierBinding('ctrlright')).toBe(true);
+    expect(isModifierBinding('alt')).toBe(true);
+    expect(isModifierBinding('mod')).toBe(true);
+    expect(isModifierBinding('ctrl+k')).toBe(false);
+    expect(isModifierBinding('mouse4')).toBe(false);
+    expect(isModifierBinding('')).toBe(false);
+  });
+
+  test('matches side-specific, generic, mod, and Windows AltGr modifier events', () => {
+    const lCtrl = event({ key: 'Control', code: 'ControlLeft', ctrlKey: true });
+    const rCtrl = event({ key: 'Control', code: 'ControlRight', ctrlKey: true });
+    const lAlt = event({ key: 'Alt', code: 'AltLeft', altKey: true });
+    const rAlt = event({ key: 'Alt', code: 'AltRight', altKey: true });
+    const altGr = event({ key: 'AltGraph', code: 'AltRight', ctrlKey: true, altKey: true });
+
+    expect(matchesBinding('ctrlleft', lCtrl, false)).toBe(true);
+    expect(matchesBinding('ctrlleft', rCtrl, false)).toBe(false);
+    expect(matchesBinding('ctrlright', rCtrl, false)).toBe(true);
+    expect(matchesBinding('ctrlright', lCtrl, false)).toBe(false);
+    expect(matchesBinding('ctrl', lCtrl, false)).toBe(true);
+    expect(matchesBinding('ctrl', rCtrl, false)).toBe(true);
+    expect(matchesBinding('ctrl', { ...rCtrl, shiftKey: true }, false)).toBe(false);
+
+    expect(matchesBinding('altleft', lAlt, false)).toBe(true);
+    expect(matchesBinding('altright', rAlt, false)).toBe(true);
+    expect(matchesBinding('altright', altGr, false)).toBe(true);
+    expect(matchesBinding('alt', altGr, false)).toBe(true);
+    expect(matchesBinding('altright', { ...altGr, shiftKey: true }, false)).toBe(false);
+    expect(matchesBinding('altleft', altGr, false)).toBe(false);
+
+    expect(matchesBinding('mod', lCtrl, false)).toBe(true);
+    expect(
+      matchesBinding('mod', event({ key: 'Meta', code: 'MetaLeft', metaKey: true }), true)
+    ).toBe(true);
+  });
+
+  test('identifies standalone modifiers from keyboard events', () => {
+    expect(standaloneModifierFromEvent(event({ key: 'Control', code: 'ControlRight' }))).toBe(
+      'ctrlright'
+    );
+    expect(
+      standaloneModifierFromEvent(
+        event({ key: 'AltGraph', code: 'AltRight', ctrlKey: true, altKey: true })
+      )
+    ).toBe('altright');
+    expect(standaloneModifierFromEvent(event({ key: 'Alt', code: '' }))).toBe('alt');
+    expect(standaloneModifierFromEvent(event({ key: 'a', code: 'KeyA' }))).toBeNull();
+  });
+
+  test('formats standalone modifiers for Windows/Linux and macOS', () => {
+    expect(formatBinding('ctrlleft', false)).toBe('Left Ctrl');
+    expect(formatBinding('ctrlright', false)).toBe('Right Ctrl');
+    expect(formatBinding('altleft', false)).toBe('Left Alt');
+    expect(formatBinding('altright', false)).toBe('Right Alt');
+    expect(formatBinding('ctrl', false)).toBe('Ctrl');
+    expect(formatBinding('alt', false)).toBe('Alt');
+    expect(formatBinding('ctrlleft', true)).toBe('Left Ctrl');
+    expect(formatBinding('altright', true)).toBe('Right ⌥');
+    expect(formatBinding('shiftleft', true)).toBe('Left ⇧');
+    expect(formatBinding('metaright', true)).toBe('Right ⌘');
+    expect(formatBinding('mod', true)).toBe('⌘');
+  });
+
+  test('detects conflicts between generic and side-specific standalone modifiers without false positives', () => {
+    expect(
+      findShortcutConflicts(
+        [
+          { id: 'a', binding: 'ctrlleft' },
+          { id: 'b', binding: 'ctrlright' },
+        ],
+        false
+      )
+    ).toHaveLength(0);
+
+    expect(
+      findShortcutConflicts(
+        [
+          { id: 'a', binding: 'ctrlright' },
+          { id: 'b', binding: 'rctrl' },
+        ],
+        false
+      )
+    ).toHaveLength(1);
+
+    expect(
+      findShortcutConflicts(
+        [
+          { id: 'a', binding: 'altright' },
+          { id: 'b', binding: 'altgr' },
+        ],
+        false
+      )
+    ).toHaveLength(1);
+
+    expect(
+      findShortcutConflicts(
+        [
+          { id: 'a', binding: 'ctrl' },
+          { id: 'b', binding: 'ctrlright' },
+        ],
+        false
+      )
+    ).toHaveLength(1);
+
+    expect(
+      findShortcutConflicts(
+        [
+          { id: 'a', binding: 'mod' },
+          { id: 'b', binding: 'ctrlleft' },
+        ],
+        false
+      )
+    ).toHaveLength(1);
+
+    expect(
+      findShortcutConflicts(
+        [
+          { id: 'a', binding: 'mod' },
+          { id: 'b', binding: 'metaleft' },
+        ],
+        true
+      )
+    ).toHaveLength(1);
   });
 });

@@ -1,10 +1,27 @@
 import {
+  applyModifierToken,
+  formatStandaloneModifier,
+  hasModifierFlags,
+  isStandaloneModifierKey,
+  matchesStandaloneModifier,
+  MODIFIER_KEY_ALIASES,
+  parsedBindingsConflict,
+  promoteSingleModifierFlag,
+  standaloneModifierFromEvent,
+} from './modifier-binding.js';
+import {
   MOUSE_DISPLAY_NAMES,
   MOUSE_KEY_ALIASES,
   mouseButtonForKey,
   type MouseEventLike,
 } from './mouse-binding.js';
 
+export {
+  isStandaloneModifierKey,
+  matchesStandaloneModifier,
+  standaloneModifierFromEvent,
+  type StandaloneModifierKey,
+} from './modifier-binding.js';
 export {
   bindingFromMouseEvent,
   suppressMouseButton,
@@ -19,6 +36,7 @@ const KEY_ALIASES: Record<string, string> = {
   esc: 'escape',
   space: ' ',
   ...MOUSE_KEY_ALIASES,
+  ...MODIFIER_KEY_ALIASES,
 };
 
 export interface ParsedBinding {
@@ -56,30 +74,9 @@ export function parseBinding(binding: string): ParsedBinding {
   };
 
   for (const token of tokens) {
-    switch (token) {
-      case 'mod':
-        parsed.mod = true;
-        break;
-      case 'control':
-      case 'ctrl':
-        parsed.ctrl = true;
-        break;
-      case 'meta':
-      case 'cmd':
-      case 'command':
-        parsed.meta = true;
-        break;
-      case 'alt':
-      case 'option':
-        parsed.alt = true;
-        break;
-      case 'shift':
-        parsed.shift = true;
-        break;
-      default:
-        parsed.key = KEY_ALIASES[token] ?? token;
-    }
+    if (!applyModifierToken(parsed, token)) parsed.key = KEY_ALIASES[token] ?? token;
   }
+  promoteSingleModifierFlag(parsed);
 
   return parsed;
 }
@@ -128,15 +125,30 @@ export function isMouseBinding(binding: string): boolean {
   return mouseButtonForKey(parseBinding(binding).key) !== undefined;
 }
 
+export function isModifierBinding(binding: string): boolean {
+  const parsed = parseBinding(binding);
+  return !hasModifierFlags(parsed) && isStandaloneModifierKey(parsed.key);
+}
+
+function modifiersMatch(
+  parsed: ParsedBinding,
+  event: Pick<KeyboardEventLike, 'ctrlKey' | 'metaKey' | 'altKey'>,
+  isMac: boolean
+): boolean {
+  return (
+    event.ctrlKey === (parsed.ctrl || (parsed.mod && !isMac)) &&
+    event.metaKey === (parsed.meta || (parsed.mod && isMac)) &&
+    event.altKey === parsed.alt
+  );
+}
+
 export function matchesBinding(binding: string, event: KeyboardEventLike, isMac: boolean): boolean {
   const parsed = parseBinding(binding);
   if (mouseButtonForKey(parsed.key) !== undefined) return false;
-  const requiredCtrl = parsed.ctrl || (parsed.mod && !isMac);
-  const requiredMeta = parsed.meta || (parsed.mod && isMac);
-
-  if (event.ctrlKey !== requiredCtrl) return false;
-  if (event.metaKey !== requiredMeta) return false;
-  if (event.altKey !== parsed.alt) return false;
+  if (!hasModifierFlags(parsed) && isStandaloneModifierKey(parsed.key)) {
+    return matchesStandaloneModifier(parsed.key, event, isMac);
+  }
+  if (!modifiersMatch(parsed, event, isMac)) return false;
   if (isNamedKey(parsed.key) && event.shiftKey !== parsed.shift) return false;
   if (parsed.shift && !event.shiftKey) return false;
 
@@ -151,16 +163,7 @@ export function matchesMouseBinding(
   const parsed = parseBinding(binding);
   const button = mouseButtonForKey(parsed.key);
   if (button === undefined || event.button !== button) return false;
-
-  const requiredCtrl = parsed.ctrl || (parsed.mod && !isMac);
-  const requiredMeta = parsed.meta || (parsed.mod && isMac);
-
-  if (event.ctrlKey !== requiredCtrl) return false;
-  if (event.metaKey !== requiredMeta) return false;
-  if (event.altKey !== parsed.alt) return false;
-  if (event.shiftKey !== parsed.shift) return false;
-
-  return true;
+  return modifiersMatch(parsed, event, isMac) && event.shiftKey === parsed.shift;
 }
 
 export function isEditableTarget(target: EventTarget | null): boolean {
@@ -182,16 +185,6 @@ export function isDialogOpen(root: ParentNode = document): boolean {
   return root.querySelector('.dialog-content, [role="dialog"]') !== null;
 }
 
-function canonicalBinding(binding: string, isMac: boolean): string {
-  const parsed = parseBinding(binding);
-  const modifiers: string[] = [];
-  if (parsed.ctrl || (parsed.mod && !isMac)) modifiers.push('ctrl');
-  if (parsed.meta || (parsed.mod && isMac)) modifiers.push('meta');
-  if (parsed.alt) modifiers.push('alt');
-  if (parsed.shift) modifiers.push('shift');
-  return [...modifiers, parsed.key].join('+');
-}
-
 export interface ConflictCandidate {
   id: string;
   binding: string;
@@ -205,11 +198,9 @@ export function findShortcutConflicts(
 
   for (const [i, a] of candidates.entries()) {
     if (a.binding === '') continue;
+    const parsedA = parseBinding(a.binding);
     for (const b of candidates.slice(i + 1)) {
-      if (
-        b.binding !== '' &&
-        canonicalBinding(a.binding, isMac) === canonicalBinding(b.binding, isMac)
-      ) {
+      if (b.binding !== '' && parsedBindingsConflict(parsedA, parseBinding(b.binding), isMac)) {
         conflicts.push([a, b]);
       }
     }
@@ -235,6 +226,9 @@ const DISPLAY_KEY_NAMES: Record<string, string> = {
 
 export function formatBinding(binding: string, isMac: boolean): string {
   const parsed = parseBinding(binding);
+  if (!hasModifierFlags(parsed) && isStandaloneModifierKey(parsed.key)) {
+    return formatStandaloneModifier(parsed.key, isMac);
+  }
   const parts: string[] = [];
 
   if (parsed.mod) parts.push(isMac ? '⌘' : 'Ctrl');
@@ -281,11 +275,9 @@ export function toProseMirrorKey(binding: string): string {
   return parts.join('-');
 }
 
-const MODIFIER_KEYS = new Set(['control', 'meta', 'alt', 'shift', 'os', 'altgraph']);
-
 export function bindingFromEvent(event: KeyboardEventLike, isMac: boolean): string | null {
+  if (standaloneModifierFromEvent(event) !== null) return null;
   const key = eventKey(event);
-  if (MODIFIER_KEYS.has(key)) return null;
 
   const parts: string[] = [];
   if (isMac ? event.metaKey : event.ctrlKey) parts.push('mod');

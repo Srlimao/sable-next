@@ -35,6 +35,7 @@ import { enterInsertsNewline, noteKeyboardInput } from '#lib/settings/enter-key.
 import { preferences } from '#lib/settings/preferences.svelte.js';
 import {
   isComposingKey,
+  isModifierBinding,
   isMouseBinding,
   isNumpadEvent,
   matchesBinding,
@@ -106,6 +107,12 @@ function shortcutKeymap(commands: Partial<Record<ShortcutId, Command>>): Plugin 
         for (const [id, command] of Object.entries(commands)) {
           const binding = bindingFor(id);
           if (!binding || isMouseBinding(binding)) continue;
+          if (isModifierBinding(binding)) {
+            if (matchesBinding(binding, event, isMacPlatform())) {
+              return command(view.state, view.dispatch, view);
+            }
+            continue;
+          }
           // ProseMirror keymaps only see event.key, so numpad keys would collide with their main-row twins.
           if (!isNumpadEvent(event)) map[toProseMirrorKey(binding)] = command;
           else if (matchesBinding(binding, event, isMacPlatform())) {

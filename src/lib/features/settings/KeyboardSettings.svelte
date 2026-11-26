@@ -15,7 +15,10 @@
     bindingFromEvent,
     bindingFromMouseEvent,
     formatBinding,
+    matchesStandaloneModifier,
+    standaloneModifierFromEvent,
     suppressMouseButton,
+    type StandaloneModifierKey,
   } from '#lib/ui/shortcuts/binding.js';
   import {
     conflictsWith,
@@ -37,6 +40,15 @@
   let isMac = $derived(isMacPlatform());
   let shortcuts = $derived(effectiveShortcuts());
   let rebound = $derived(SHORTCUTS.some((shortcut) => isRebound(shortcut.id)));
+  let pendingModifier: StandaloneModifierKey | null = null;
+  let modifierDirty = false;
+  let altGrPending = false;
+
+  function resetPendingModifier(): void {
+    pendingModifier = null;
+    modifierDirty = false;
+    altGrPending = false;
+  }
 
   $effect(() => {
     const id = capturing;
@@ -47,16 +59,53 @@
       'mousedown',
       (event) => {
         const binding = bindingFromMouseEvent(event, isMac);
-        if (binding === null) return;
+        if (binding === null) {
+          if (pendingModifier !== null) {
+            pendingModifier = null;
+            modifierDirty = true;
+            altGrPending = false;
+          }
+          return;
+        }
         event.preventDefault();
         event.stopPropagation();
         suppressMouseButton(event.button);
+        resetPendingModifier();
         applyBinding(id, binding);
       },
       { capture: true }
     );
+    const offKeyup = on(
+      window,
+      'keyup',
+      (event) => {
+        const modifier = standaloneModifierFromEvent(event);
+        if (modifier === null) return;
+        if (altGrPending && modifier === 'ctrlleft') {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+        if (pendingModifier !== null && modifier === pendingModifier) {
+          event.preventDefault();
+          event.stopPropagation();
+          const binding = pendingModifier;
+          resetPendingModifier();
+          applyBinding(id, binding);
+          return;
+        }
+        if (!event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
+          resetPendingModifier();
+        }
+      },
+      { capture: true }
+    );
+    const offBlur = on(window, 'blur', resetPendingModifier);
     return () => {
       offMousedown();
+      offKeyup();
+      offBlur();
+      resetPendingModifier();
       shortcutCapture.active = false;
     };
   });
@@ -86,10 +135,41 @@
     event.preventDefault();
     if (event.key === 'Escape') {
       event.stopPropagation();
+      resetPendingModifier();
       capturing = null;
       rejected = null;
       return;
     }
+    const modifier = standaloneModifierFromEvent(event);
+    if (modifier !== null) {
+      event.stopPropagation();
+      if (event.repeat) return;
+      if (
+        modifier === 'altright' &&
+        event.key === 'AltGraph' &&
+        !event.shiftKey &&
+        !event.metaKey &&
+        (pendingModifier === null || pendingModifier === 'ctrlleft')
+      ) {
+        pendingModifier = 'altright';
+        altGrPending = true;
+        modifierDirty = false;
+        return;
+      }
+      if (
+        !modifierDirty &&
+        pendingModifier === null &&
+        matchesStandaloneModifier(modifier, event, isMac)
+      ) {
+        pendingModifier = modifier;
+      } else {
+        pendingModifier = null;
+        modifierDirty = true;
+        altGrPending = false;
+      }
+      return;
+    }
+    resetPendingModifier();
     const binding = bindingFromEvent(event, isMac);
     if (binding === null) return;
     applyBinding(id, binding);

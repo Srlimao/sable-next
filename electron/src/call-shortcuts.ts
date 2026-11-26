@@ -52,6 +52,18 @@ const KEY_NAMES: Record<string, [string, string, string]> = {
   mouse3: ['', '', 'mouse3'],
   mouse4: ['', '', 'mouse4'],
   mouse5: ['', '', 'mouse5'],
+  ctrl: ['', '', 'CTRL'],
+  ctrlleft: ['', '', 'CTRLLEFT'],
+  ctrlright: ['', '', 'CTRLRIGHT'],
+  alt: ['', '', 'ALT'],
+  altleft: ['', '', 'ALTLEFT'],
+  altright: ['', '', 'ALTRIGHT'],
+  shift: ['', '', 'SHIFT'],
+  shiftleft: ['', '', 'SHIFTLEFT'],
+  shiftright: ['', '', 'SHIFTRIGHT'],
+  meta: ['', '', 'SUPER'],
+  metaleft: ['', '', 'SUPERLEFT'],
+  metaright: ['', '', 'SUPERRIGHT'],
 };
 
 export function nativeBinding(binding: DesktopCallShortcut, isMac: boolean) {
@@ -61,19 +73,12 @@ export function nativeBinding(binding: DesktopCallShortcut, isMac: boolean) {
   if (parsed.meta || (parsed.mod && isMac)) modifiers.push('SUPER');
   if (parsed.alt) modifiers.push('ALT');
   if (parsed.shift) modifiers.push('SHIFT');
+  const lookupKey = parsed.key === 'mod' ? (isMac ? 'meta' : 'ctrl') : parsed.key;
   const [key, trigger, passive] =
-    KEY_NAMES[parsed.key] ??
-    (/^num\d$/.test(parsed.key)
-      ? [
-          `Numpad${parsed.key.slice(3)}`,
-          `KP_${parsed.key.slice(3)}`,
-          `keypad${parsed.key.slice(3)}`,
-        ]
-      : [
-          parsed.key,
-          /^f\d+$/.test(parsed.key) ? parsed.key.toUpperCase() : parsed.key,
-          parsed.key,
-        ]);
+    KEY_NAMES[lookupKey] ??
+    (/^num\d$/.test(lookupKey)
+      ? [`Numpad${lookupKey.slice(3)}`, `KP_${lookupKey.slice(3)}`, `keypad${lookupKey.slice(3)}`]
+      : [lookupKey, /^f\d+$/.test(lookupKey) ? lookupKey.toUpperCase() : lookupKey, lookupKey]);
   return {
     id: binding.id,
     description: binding.description,

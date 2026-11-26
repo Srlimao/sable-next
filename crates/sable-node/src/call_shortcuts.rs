@@ -160,6 +160,33 @@ fn passive_shortcuts(
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+fn required_modifiers_held(
+    required: handy_keys::Modifiers,
+    current: handy_keys::Modifiers,
+) -> bool {
+    use handy_keys::Modifiers;
+
+    for (left, right) in [
+        (Modifiers::CMD_LEFT, Modifiers::CMD_RIGHT),
+        (Modifiers::SHIFT_LEFT, Modifiers::SHIFT_RIGHT),
+        (Modifiers::CTRL_LEFT, Modifiers::CTRL_RIGHT),
+        (Modifiers::OPT_LEFT, Modifiers::OPT_RIGHT),
+    ] {
+        let need_left = required.contains(left);
+        let need_right = required.contains(right);
+        if need_left && need_right {
+            if !current.contains(left) && !current.contains(right) {
+                return false;
+            }
+        } else if (need_left && !current.contains(left)) || (need_right && !current.contains(right))
+        {
+            return false;
+        }
+    }
+    !required.contains(Modifiers::FN) || current.contains(Modifiers::FN)
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
 fn passive_shortcuts(
     bindings: &[CallShortcutBinding],
     notify: Callback,
@@ -198,7 +225,7 @@ fn passive_shortcuts(
                     held.contains(id)
                         && match event.key {
                             Some(_) => hotkey.key == event.key,
-                            None => !hotkey.modifiers.matches(event.modifiers),
+                            None => !required_modifiers_held(hotkey.modifiers, event.modifiers),
                         }
                 };
                 if !fires {
@@ -317,11 +344,54 @@ mod tests {
             "CTRL+mouse2",
             "SUPER+SHIFT+mouse4",
             "ALT+mouse5",
+            "CTRL",
+            "CTRLLEFT",
+            "CTRLRIGHT",
+            "ALT",
+            "ALTLEFT",
+            "ALTRIGHT",
+            "SHIFT",
+            "SHIFTLEFT",
+            "SHIFTRIGHT",
+            "SUPER",
+            "SUPERLEFT",
+            "SUPERRIGHT",
         ] {
             assert!(
                 binding.parse::<handy_keys::Hotkey>().is_ok(),
                 "{binding} should parse"
             );
         }
+    }
+
+    #[test]
+    fn required_modifiers_held_handles_sides_and_extra_modifiers() {
+        use super::required_modifiers_held;
+        use handy_keys::Modifiers;
+
+        assert!(required_modifiers_held(
+            Modifiers::CTRL_RIGHT,
+            Modifiers::CTRL_RIGHT | Modifiers::SHIFT_LEFT
+        ));
+        assert!(!required_modifiers_held(
+            Modifiers::CTRL_RIGHT,
+            Modifiers::CTRL_LEFT
+        ));
+        assert!(required_modifiers_held(
+            Modifiers::CTRL,
+            Modifiers::CTRL_LEFT
+        ));
+        assert!(required_modifiers_held(
+            Modifiers::CTRL,
+            Modifiers::CTRL_RIGHT | Modifiers::OPT_LEFT
+        ));
+        assert!(!required_modifiers_held(
+            Modifiers::CTRL,
+            Modifiers::OPT_LEFT
+        ));
+        assert!(required_modifiers_held(
+            Modifiers::empty(),
+            Modifiers::SHIFT_LEFT
+        ));
     }
 }

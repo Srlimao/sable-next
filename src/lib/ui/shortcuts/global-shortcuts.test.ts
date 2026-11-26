@@ -313,3 +313,71 @@ test('active shortcut capture blocks global mouse and keyboard shortcuts', () =>
   expect(mouse('mousedown', { button: 3 }).defaultPrevented).toBe(false);
   expect(handler).not.toHaveBeenCalled();
 });
+
+test('push-to-talk holds and releases on Right Ctrl alone', () => {
+  const { press, release } = holdShortcut();
+  rebind('call.pushToTalk', 'ctrlright');
+
+  expect(
+    key('keydown', { key: 'Control', code: 'ControlRight', ctrlKey: true, shiftKey: false })
+      .defaultPrevented
+  ).toBe(true);
+  expect(press).toHaveBeenCalledOnce();
+  expect(release).not.toHaveBeenCalled();
+
+  key('keyup', { key: 'x', code: 'KeyX', ctrlKey: true, shiftKey: false });
+  expect(release).not.toHaveBeenCalled();
+
+  key('keyup', { key: 'Control', code: 'ControlLeft', ctrlKey: true, shiftKey: false });
+  expect(release).not.toHaveBeenCalled();
+
+  key('keyup', { key: 'Control', code: 'ControlRight', ctrlKey: false, shiftKey: false });
+  expect(release).toHaveBeenCalledOnce();
+});
+
+test('push-to-talk holds and releases on Windows AltGr (Right Alt)', () => {
+  const { press, release } = holdShortcut();
+  rebind('call.pushToTalk', 'altright');
+
+  key('keydown', {
+    key: 'AltGraph',
+    code: 'AltRight',
+    ctrlKey: true,
+    altKey: true,
+    shiftKey: false,
+  });
+  expect(press).toHaveBeenCalledOnce();
+
+  key('keyup', {
+    key: 'AltGraph',
+    code: 'AltRight',
+    ctrlKey: false,
+    altKey: false,
+    shiftKey: false,
+  });
+  expect(release).toHaveBeenCalledOnce();
+});
+
+test('action shortcut fires on Right Alt alone', () => {
+  const handler = vi.fn();
+  rebind('navigation.nextRoom', 'altright');
+  cleanup = registerGlobalShortcuts({ 'navigation.nextRoom': handler });
+
+  key('keydown', { key: 'Alt', code: 'AltRight', ctrlKey: false, altKey: true, shiftKey: false });
+  expect(handler).toHaveBeenCalledOnce();
+});
+
+test('unmodified Shift hold shortcut does not intercept typing in editable fields', () => {
+  const { press } = holdShortcut();
+  rebind('call.pushToTalk', 'shiftleft');
+  const textarea = document.createElement('textarea');
+  document.body.append(textarea);
+
+  const event = key(
+    'keydown',
+    { key: 'Shift', code: 'ShiftLeft', ctrlKey: false, shiftKey: true },
+    textarea
+  );
+  expect(event.defaultPrevented).toBe(false);
+  expect(press).not.toHaveBeenCalled();
+});

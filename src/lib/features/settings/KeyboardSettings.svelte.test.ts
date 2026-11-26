@@ -100,3 +100,252 @@ test('recording ignores unmodified right click but accepts modified right click'
   expect(bindingFor(first.id)).toBe('alt+mouse2');
   expect(recorder).toHaveTextContent('Alt+Mouse Right');
 });
+
+test('tapping Right Ctrl alone binds ctrlright on keyup', async () => {
+  const user = userEvent.setup();
+  render(KeyboardSettings);
+  const [first] = SHORTCUTS;
+
+  const [recorder] = screen.getAllByRole('button', { pressed: false });
+  await user.click(recorder);
+
+  recorder.dispatchEvent(
+    new KeyboardEvent('keydown', {
+      key: 'Control',
+      code: 'ControlRight',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+  );
+  flushSync();
+  expect(recorder).toHaveAttribute('aria-pressed', 'true');
+
+  window.dispatchEvent(
+    new KeyboardEvent('keyup', {
+      key: 'Control',
+      code: 'ControlRight',
+      ctrlKey: false,
+      bubbles: true,
+      cancelable: true,
+    })
+  );
+  flushSync();
+  expect(bindingFor(first.id)).toBe('ctrlright');
+  expect(recorder).toHaveAttribute('aria-pressed', 'false');
+  expect(recorder).toHaveTextContent('Right Ctrl');
+});
+
+test('tapping Left Alt alone binds altleft on keyup', async () => {
+  const user = userEvent.setup();
+  render(KeyboardSettings);
+  const [first] = SHORTCUTS;
+
+  const [recorder] = screen.getAllByRole('button', { pressed: false });
+  await user.click(recorder);
+
+  recorder.dispatchEvent(
+    new KeyboardEvent('keydown', {
+      key: 'Alt',
+      code: 'AltLeft',
+      altKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+  );
+  window.dispatchEvent(
+    new KeyboardEvent('keyup', {
+      key: 'Alt',
+      code: 'AltLeft',
+      altKey: false,
+      bubbles: true,
+      cancelable: true,
+    })
+  );
+  flushSync();
+  expect(bindingFor(first.id)).toBe('altleft');
+  expect(recorder).toHaveTextContent('Left Alt');
+});
+
+test('tapping Windows AltGr binds altright on keyup despite synthetic Left Ctrl events', async () => {
+  const user = userEvent.setup();
+  render(KeyboardSettings);
+  const [first] = SHORTCUTS;
+
+  const [recorder] = screen.getAllByRole('button', { pressed: false });
+  await user.click(recorder);
+
+  recorder.dispatchEvent(
+    new KeyboardEvent('keydown', {
+      key: 'Control',
+      code: 'ControlLeft',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+  );
+  recorder.dispatchEvent(
+    new KeyboardEvent('keydown', {
+      key: 'AltGraph',
+      code: 'AltRight',
+      ctrlKey: true,
+      altKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+  );
+  window.dispatchEvent(
+    new KeyboardEvent('keyup', {
+      key: 'Control',
+      code: 'ControlLeft',
+      ctrlKey: false,
+      altKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+  );
+  flushSync();
+  expect(recorder).toHaveAttribute('aria-pressed', 'true');
+
+  window.dispatchEvent(
+    new KeyboardEvent('keyup', {
+      key: 'AltGraph',
+      code: 'AltRight',
+      ctrlKey: false,
+      altKey: false,
+      bubbles: true,
+      cancelable: true,
+    })
+  );
+  flushSync();
+  expect(bindingFor(first.id)).toBe('altright');
+  expect(recorder).toHaveTextContent('Right Alt');
+});
+
+test('pressing Ctrl+J still binds mod+j instead of ctrlleft', async () => {
+  const user = userEvent.setup();
+  render(KeyboardSettings);
+  const [first] = SHORTCUTS;
+
+  const [recorder] = screen.getAllByRole('button', { pressed: false });
+  await user.click(recorder);
+
+  recorder.dispatchEvent(
+    new KeyboardEvent('keydown', {
+      key: 'Control',
+      code: 'ControlLeft',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+  );
+  recorder.dispatchEvent(
+    new KeyboardEvent('keydown', {
+      key: 'j',
+      code: 'KeyJ',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+  );
+  flushSync();
+  window.dispatchEvent(
+    new KeyboardEvent('keyup', {
+      key: 'Control',
+      code: 'ControlLeft',
+      ctrlKey: false,
+      bubbles: true,
+      cancelable: true,
+    })
+  );
+  flushSync();
+  expect(bindingFor(first.id)).toBe('mod+j');
+});
+
+test('pressing two modifiers without a regular key keeps recording active', async () => {
+  const user = userEvent.setup();
+  render(KeyboardSettings);
+
+  const [recorder] = screen.getAllByRole('button', { pressed: false });
+  await user.click(recorder);
+
+  recorder.dispatchEvent(
+    new KeyboardEvent('keydown', {
+      key: 'Control',
+      code: 'ControlLeft',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+  );
+  recorder.dispatchEvent(
+    new KeyboardEvent('keydown', {
+      key: 'Shift',
+      code: 'ShiftLeft',
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+  );
+  window.dispatchEvent(
+    new KeyboardEvent('keyup', {
+      key: 'Shift',
+      code: 'ShiftLeft',
+      ctrlKey: true,
+      shiftKey: false,
+      bubbles: true,
+      cancelable: true,
+    })
+  );
+  window.dispatchEvent(
+    new KeyboardEvent('keyup', {
+      key: 'Control',
+      code: 'ControlLeft',
+      ctrlKey: false,
+      shiftKey: false,
+      bubbles: true,
+      cancelable: true,
+    })
+  );
+  flushSync();
+  expect(recorder).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('holding Alt and clicking Mouse 4 binds alt+mouse4 instead of altleft', async () => {
+  const user = userEvent.setup();
+  render(KeyboardSettings);
+  const [first] = SHORTCUTS;
+
+  const [recorder] = screen.getAllByRole('button', { pressed: false });
+  await user.click(recorder);
+
+  recorder.dispatchEvent(
+    new KeyboardEvent('keydown', {
+      key: 'Alt',
+      code: 'AltLeft',
+      altKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+  );
+  window.dispatchEvent(
+    new MouseEvent('mousedown', {
+      button: 3,
+      altKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+  );
+  window.dispatchEvent(
+    new KeyboardEvent('keyup', {
+      key: 'Alt',
+      code: 'AltLeft',
+      altKey: false,
+      bubbles: true,
+      cancelable: true,
+    })
+  );
+  flushSync();
+  expect(bindingFor(first.id)).toBe('alt+mouse4');
+});
