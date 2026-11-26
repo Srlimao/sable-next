@@ -1,4 +1,4 @@
-name: Build Windows Setup & Portable GitHub Release
+name: Build Windows Setup & GitHub Release
 
 on:
   push:
@@ -157,6 +157,6 @@ jobs:
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
               --title "Sable $VERSION ($FLAVOR)" \
-              --notes "Windows setup and portable builds from commit $GITHUB_SHA ($FLAVOR flavor)." \
+              --notes "Windows setup built from commit $GITHUB_SHA ($FLAVOR flavor)." \
               "${extra_args[@]}"
           fi
