@@ -27,7 +27,7 @@ use matrix_sdk_ui::{
 use crate::SignedIn;
 use crate::protocol::{
     MembershipChangeView, MentionView, MessageShieldCode, MessageShieldView, PerMessageProfileView,
-    ReactionGroup, SendBlockView, SendStateView, SharedByView, ThreadSummaryView,
+    ReactionGroup, SendBlockView, SendStateView, SharedByView, StateChangeView, ThreadSummaryView,
     TimelineItemContentView, TimelineItemView, TimelineRowKind, TimelineVisibility,
     UploadProgressView,
 };
@@ -349,9 +349,11 @@ impl TimelineItemContentView {
             Self::Membership { .. } => TimelineVisibility::Membership,
             Self::ProfileChange { .. } => TimelineVisibility::ProfileChange,
             Self::Redacted { .. } => TimelineVisibility::Tombstone,
-            Self::StateEvent { change: None, .. } | Self::HiddenEvent { .. } => {
-                TimelineVisibility::Hidden
+            Self::StateEvent {
+                change: None | Some(StateChangeView::CallMembership { .. }),
+                ..
             }
+            | Self::HiddenEvent { .. } => TimelineVisibility::Hidden,
             _ => TimelineVisibility::Always,
         }
     }
@@ -1024,6 +1026,14 @@ mod tests {
             redacts: None,
         };
         assert_eq!(hidden.visibility(), TimelineVisibility::Hidden);
+        let call_membership = TimelineItemContentView::StateEvent {
+            event_type: "org.matrix.msc3401.call.member".to_owned(),
+            state_key: "@alice:example.org_DEVICE".to_owned(),
+            content: None,
+            prev_content: None,
+            change: Some(StateChangeView::CallMembership { joined: true }),
+        };
+        assert_eq!(call_membership.visibility(), TimelineVisibility::Hidden);
         let divider = TimelineItemContentView::DateDivider { timestamp: 0 };
         assert_eq!(divider.visibility(), TimelineVisibility::Always);
     }

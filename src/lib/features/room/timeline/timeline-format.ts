@@ -75,6 +75,9 @@ function isVisibleEvent(
     case 'hidden':
       return preferences.showHiddenEvents && preferences.hiddenEventOther;
     case 'always':
+      if (isCallMembership(item)) {
+        return preferences.showHiddenEvents && preferences.hiddenEventOther;
+      }
       return (
         !(preferences.hideTopicChanges && isTopicChange(item)) &&
         !(preferences.hideSentBeforeJoined && isSentBeforeJoined(item))
@@ -86,6 +89,10 @@ export function isSentBeforeJoined(item: TimelineItemView): boolean {
   return (
     item.content.kind === 'unable_to_decrypt' && item.content.reason === 'sent_before_we_joined'
   );
+}
+
+function isCallMembership(item: TimelineItemView): boolean {
+  return item.content.kind === 'state_event' && item.content.change?.kind === 'call_membership';
 }
 
 function isTopicChange(item: TimelineItemView): boolean {

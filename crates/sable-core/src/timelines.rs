@@ -469,7 +469,9 @@ fn is_signaling_event(event: &AnySyncTimelineEvent) -> bool {
     let event_type = event.event_type().to_string();
     matches!(
         event_type.as_str(),
-        "m.rtc.member"
+        "m.call.member"
+            | "org.matrix.msc3401.call.member"
+            | "m.rtc.member"
             | "org.matrix.msc4143.rtc.member"
             | "io.element.call.encryption_keys"
             | "org.matrix.msc4075.rtc.notification"
@@ -552,6 +554,8 @@ mod tests {
     fn signaling_events_are_filtered_unless_hidden_events_are_on() {
         let rules = ruma::room_version_rules::RoomVersionRules::V11;
         let event_json = [
+            ("m.call.member", "{}", true),
+            ("org.matrix.msc3401.call.member", "{}", true),
             ("m.rtc.member", "{}", true),
             ("org.matrix.msc4143.rtc.member", "{}", true),
             ("io.element.call.encryption_keys", "{}", false),
@@ -567,7 +571,7 @@ mod tests {
             ),
         ];
         for (event_type, content, hidden) in event_json {
-            let state_key = if event_type.ends_with("rtc.member") {
+            let state_key = if event_type.ends_with(".member") {
                 r#","state_key":"@alice:example.org_DEVICE""#
             } else {
                 ""

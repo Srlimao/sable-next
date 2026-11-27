@@ -3757,18 +3757,33 @@ async fn joining_a_call_is_worded_as_a_join() {
         )
         .await;
 
-    let changes = state_changes(
-        &timeline_views(&client, &room, false)
-            .await
-            .expect("a timeline for a joined room"),
-    );
+    let hidden_off = timeline_views(&client, &room, false)
+        .await
+        .expect("a timeline for a joined room");
+    assert!(state_changes(&hidden_off).is_empty());
 
+    let hidden_on = timeline_views(&client, &room, true)
+        .await
+        .expect("a timeline for a joined room");
     assert!(matches!(
-        changes.as_slice(),
+        state_changes(&hidden_on).as_slice(),
         [Some(crate::protocol::StateChangeView::CallMembership {
             joined: true
         })]
     ));
+    let call_item = hidden_on
+        .iter()
+        .find(|view| {
+            matches!(
+                view.content,
+                crate::protocol::TimelineItemContentView::StateEvent { .. }
+            )
+        })
+        .expect("call membership state event");
+    assert_eq!(
+        call_item.visibility,
+        crate::protocol::TimelineVisibility::Hidden
+    );
 }
 
 /// The UI branches on these variants, so the mapping is a contract.

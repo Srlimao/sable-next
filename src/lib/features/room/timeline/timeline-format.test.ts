@@ -374,7 +374,6 @@ test('keeps described room changes visible with other hidden events disabled', (
     stateChange({ kind: 'room_topic', topic: 'hi' }),
     stateChange({ kind: 'room_avatar', removed: true }),
     stateChange({ kind: 'pinned_events', added: ['$pin'], removed: [], total: 1 }),
-    stateChange({ kind: 'call_membership', joined: true }),
   ];
 
   for (const showHiddenEvents of [false, true]) {
@@ -385,6 +384,40 @@ test('keeps described room changes visible with other hidden events disabled', (
         hiddenEventOther: false,
       })
     ).toEqual(changes);
+  }
+});
+
+test('gates call membership join and leave logs behind both hidden-event switches', () => {
+  const msg = withEvent(message, '$msg');
+  const callJoin = {
+    ...withEvent(stateChange({ kind: 'call_membership', joined: true }), '$call-join'),
+    read_by: ['@bob:example.org'],
+    read_timestamps: { '@bob:example.org': 5 },
+  };
+  const callLeave = withEvent(
+    stateChange({ kind: 'call_membership', joined: false }),
+    '$call-leave'
+  );
+
+  for (const showHiddenEvents of [false, true]) {
+    for (const hiddenEventOther of [false, true]) {
+      const visible = visibleTimelineItems([msg, callJoin, callLeave], {
+        ...defaults,
+        showHiddenEvents,
+        hiddenEventOther,
+      });
+      if (showHiddenEvents && hiddenEventOther) {
+        expect(visible.map((entry) => entry.event_id)).toEqual([
+          '$msg',
+          '$call-join',
+          '$call-leave',
+        ]);
+      } else {
+        expect(visible.map((entry) => entry.event_id)).toEqual(['$msg']);
+      }
+      expect(visible[0].read_by).toEqual(['@bob:example.org']);
+      expect(visible[0].read_timestamps).toEqual({ '@bob:example.org': 5 });
+    }
   }
 });
 
