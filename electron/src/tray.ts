@@ -1,4 +1,15 @@
 import { app, Menu, nativeImage, Tray, type BrowserWindow, type NativeImage } from 'electron';
+import { join } from 'node:path';
+import type { TrayCallStatus } from '../../src/lib/platform/tray-call-types';
+import { writeMultiResIco } from './tray-ico';
+
+const TOOLTIPS: Record<TrayCallStatus, string> = {
+  idle: 'Sable',
+  connected: 'Sable — Connected',
+  speaking: 'Sable — Speaking',
+  muted: 'Sable — Muted',
+  deafened: 'Sable — Deafened',
+};
 
 function withUnreadDot(base: NativeImage): NativeImage {
   const { width, height } = base.getSize();
@@ -39,23 +50,84 @@ export class DesktopTray {
   private tray: Tray | null = null;
   private unread = false;
   private baseIcon: NativeImage | null = null;
+  private callStatus: TrayCallStatus = 'idle';
+  private callIconDataUrl: string | null = null;
+  private callIcon: NativeImage | null = null;
+  private readonly callIconCache = new Map<string, NativeImage>();
+  private readonly windowsIcoCache = new Map<string, NativeImage>();
 
   constructor(
     private readonly iconPath: string,
     private readonly getWindow: () => BrowserWindow | null,
-    private readonly platform: NodeJS.Platform = process.platform
+    private readonly platform: NodeJS.Platform = process.platform,
+    private readonly iconCacheDir?: string
   ) {}
 
   get available(): boolean {
     return this.tray !== null;
   }
 
+  private currentImage(): NativeImage | null {
+    if (this.callStatus !== 'idle' && this.callIcon) {
+      const master = this.unread ? withUnreadDot(this.callIcon) : this.callIcon;
+      if (this.platform === 'win32' && this.iconCacheDir && this.callIconDataUrl) {
+        const key = `${this.callStatus}:${this.unread ? 'unread' : 'read'}:${this.callIconDataUrl}`;
+        const cached = this.windowsIcoCache.get(key);
+        if (cached) return cached;
+        const icoPath = join(
+          this.iconCacheDir,
+          `tray-call-${this.callStatus}${this.unread ? '-unread' : ''}.ico`
+        );
+        const ico = writeMultiResIco(master, icoPath);
+        if (ico) {
+          this.windowsIcoCache.set(key, ico);
+          return ico;
+        }
+      }
+      return master;
+    }
+    if (!this.baseIcon) return null;
+    return this.unread ? withUnreadDot(this.baseIcon) : this.baseIcon;
+  }
+
+  refresh(): void {
+    if (!this.tray) return;
+    const image = this.currentImage();
+    if (image) this.tray.setImage(image);
+  }
+
   setUnread(unread: boolean): void {
     if (this.unread === unread) return;
-    if (this.tray && this.baseIcon) {
-      this.tray.setImage(unread ? withUnreadDot(this.baseIcon) : this.baseIcon);
-    }
     this.unread = unread;
+    if (this.tray) {
+      const image = this.currentImage();
+      if (image) this.tray.setImage(image);
+    }
+  }
+
+  setCallState(status: TrayCallStatus, iconDataUrl: string | null): void {
+    const nextDataUrl = status === 'idle' ? null : iconDataUrl;
+    if (this.callStatus === status && this.callIconDataUrl === nextDataUrl) return;
+    this.callStatus = status;
+    this.callIconDataUrl = nextDataUrl;
+    if (nextDataUrl) {
+      let image = this.callIconCache.get(nextDataUrl);
+      if (!image) {
+        const decoded = nativeImage.createFromDataURL(nextDataUrl);
+        if (!decoded.isEmpty()) {
+          this.callIconCache.set(nextDataUrl, decoded);
+          image = decoded;
+        }
+      }
+      this.callIcon = image ?? null;
+    } else {
+      this.callIcon = null;
+    }
+    if (this.tray) {
+      this.tray.setToolTip(TOOLTIPS[this.callStatus]);
+      const image = this.currentImage();
+      if (image) this.tray.setImage(image);
+    }
   }
 
   showWindow(): void {
@@ -85,8 +157,8 @@ export class DesktopTray {
       const icon = nativeImage.createFromPath(this.iconPath);
       if (icon.isEmpty()) throw new Error(`Could not load tray icon: ${this.iconPath}`);
       this.baseIcon = icon;
-      this.tray = new Tray(this.unread ? withUnreadDot(icon) : icon);
-      this.tray.setToolTip('Sable');
+      this.tray = new Tray(this.currentImage() ?? icon);
+      this.tray.setToolTip(TOOLTIPS[this.callStatus]);
       this.tray.setContextMenu(
         Menu.buildFromTemplate([
           {

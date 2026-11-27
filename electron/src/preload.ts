@@ -10,6 +10,7 @@ import type {
   DesktopCallShortcut,
   DesktopCallShortcutEvent,
 } from '../../src/lib/platform/call-shortcut-types';
+import type { TrayCallState } from '../../src/lib/platform/tray-call-types';
 import type {
   VoiceOverlayAction,
   VoiceOverlayConfig,
@@ -79,6 +80,9 @@ contextBridge.exposeInMainWorld('sableElectron', {
   },
   setBadge: (count: number, overlay: string | null) =>
     ipcRenderer.invoke('sable-badge', count, overlay) as Promise<void>,
+  setTrayCallState: (state: TrayCallState) => {
+    ipcRenderer.send('sable-tray-call-state', state);
+  },
   requestAttention: () => {
     ipcRenderer.send('sable-request-attention');
   },

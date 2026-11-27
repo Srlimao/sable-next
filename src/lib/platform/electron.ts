@@ -9,6 +9,7 @@ import type { ScreenAudioChoice } from './screen-audio-stream';
 import type { ScreenAudioListing } from './screen-audio-types';
 import type { DesktopWindowSettings, DesktopWindowState } from './window-decorations';
 import type { DesktopCallShortcut, DesktopCallShortcutEvent } from './call-shortcut-types';
+import type { TrayCallState } from './tray-call-types';
 import type {
   VoiceOverlayAction,
   VoiceOverlayConfig,
@@ -46,6 +47,7 @@ export interface ElectronBridge {
   setCallShortcuts(bindings: DesktopCallShortcut[]): Promise<void>;
   onCallShortcut(callback: (event: DesktopCallShortcutEvent) => void): () => void;
   setBadge(count: number, overlay: string | null): Promise<void>;
+  setTrayCallState?(state: TrayCallState): void;
   requestAttention(): void;
   clearWebCaches(): Promise<void>;
   dataDir(): Promise<string | null>;

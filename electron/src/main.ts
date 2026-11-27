@@ -43,6 +43,7 @@ import { CallShortcuts, validBindings } from './call-shortcuts';
 import { VoiceOverlayManager } from './voice-overlay';
 import { sanitizeOverlayConfig, sanitizeOverlayState } from './voice-overlay-layout';
 import type { VoiceOverlayAction } from '../../src/lib/platform/voice-overlay-types';
+import type { TrayCallStatus } from '../../src/lib/platform/tray-call-types';
 import { autostartAvailable, setLaunchAtLogin } from './autostart';
 import { installMethod } from './install-method';
 import { registerContextMenu } from './context-menu';
@@ -333,7 +334,12 @@ function trayIconPath(): string {
     : join(app.getAppPath(), `../src-tauri/icons/icon.${extension}`);
 }
 
-const desktopTray = new DesktopTray(trayIconPath(), () => mainWindow);
+const desktopTray = new DesktopTray(
+  trayIconPath(),
+  () => mainWindow,
+  process.platform,
+  join(app.getPath('userData'), 'tray-icons')
+);
 let trayHostReady = false;
 
 function updateTray(): boolean {
@@ -531,6 +537,26 @@ ipcMain.handle('sable-badge', (event, count: unknown, overlay: unknown) => {
   } else {
     window.setOverlayIcon(null, '');
   }
+});
+
+function isTrayCallStatus(value: unknown): value is TrayCallStatus {
+  return (
+    value === 'idle' ||
+    value === 'connected' ||
+    value === 'speaking' ||
+    value === 'muted' ||
+    value === 'deafened'
+  );
+}
+
+ipcMain.on('sable-tray-call-state', (event, raw: unknown) => {
+  if (!isAppFrame(event.senderFrame) || event.sender !== mainWindow?.webContents) return;
+  if (typeof raw !== 'object' || raw === null) return;
+  const { status, icon } = raw as { status?: unknown; icon?: unknown };
+  if (!isTrayCallStatus(status)) return;
+  const dataUrl =
+    typeof icon === 'string' && icon.startsWith('data:image/png;base64,') ? icon : null;
+  desktopTray.setCallState(status, status === 'idle' ? null : dataUrl);
 });
 
 ipcMain.on('sable-request-attention', (event) => {
@@ -742,6 +768,7 @@ function createWindow(): BrowserWindow {
     screenAudio.stop();
     callShortcuts.stop();
     voiceOverlay.stop();
+    desktopTray.setCallState('idle', null);
     mainWindow = null;
     pageListening = false;
   });
@@ -812,11 +839,13 @@ function createWindow(): BrowserWindow {
     screenAudio.stop();
     callShortcuts.stop();
     voiceOverlay.stop();
+    desktopTray.setCallState('idle', null);
   });
   window.webContents.on('render-process-gone', (_event, details) => {
     screenAudio.stop();
     callShortcuts.stop();
     voiceOverlay.stop();
+    desktopTray.setCallState('idle', null);
     if (details.reason === 'clean-exit' || quitting) return;
     const now = Date.now();
     if (now - lastCrashReload < CRASH_RELOAD_INTERVAL_MS) return;
@@ -1086,6 +1115,9 @@ if (!app.requestSingleInstanceLock()) {
     void waitForTrayHost().then(() => {
       trayHostReady = true;
       if (!quitting) updateTray();
+    });
+    screen.on('display-metrics-changed', (_event, _display, changedMetrics) => {
+      if (changedMetrics.includes('scaleFactor')) desktopTray.refresh();
     });
     core = startCore();
     protocol.handle(SCHEME, serveApp);

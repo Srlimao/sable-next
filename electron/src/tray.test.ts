@@ -1,4 +1,7 @@
 import { EventEmitter } from 'node:events';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { BrowserWindow, MenuItemConstructorOptions, NativeImage } from 'electron';
 import { beforeEach, expect, test, vi } from 'vitest';
 
@@ -15,13 +18,32 @@ const mocks = vi.hoisted(() => ({
     bitmap,
     size,
   })),
+  createFromDataURL: vi.fn((dataUrl: string) => ({
+    dataUrl,
+    isEmpty: () => !dataUrl.startsWith('data:image/png;base64,'),
+    getSize: () => ({ width: 64, height: 64 }),
+    toBitmap: () => Buffer.alloc(64 * 64 * 4, 50),
+    resize: vi.fn((opts: { width: number; height: number; quality?: string }) => ({
+      toPNG: () => Buffer.from(`png-${opts.width}x${opts.height}-${opts.quality ?? 'default'}`),
+    })),
+  })),
+  createFromPath: vi.fn((filePath: string) => {
+    if (filePath.includes('tray-call-')) {
+      return {
+        icoPath: filePath,
+        isEmpty: () => false,
+      };
+    }
+    return undefined;
+  }),
 }));
 
 vi.mock('electron', () => ({
   app: { quit: mocks.quit },
   nativeImage: {
-    createFromPath: () => mocks.baseIcon,
+    createFromPath: (filePath: string) => mocks.createFromPath(filePath) ?? mocks.baseIcon,
     createFromBitmap: mocks.createFromBitmap,
+    createFromDataURL: mocks.createFromDataURL,
   },
   Menu: {
     buildFromTemplate: (items: MenuItemConstructorOptions[]) => {
@@ -46,6 +68,7 @@ const trayEvents: (EventEmitter & {
   image: NativeImage;
   destroy: ReturnType<typeof vi.fn>;
   setImage: ReturnType<typeof vi.fn>;
+  setToolTip: ReturnType<typeof vi.fn>;
 })[] = [];
 
 import { closeAction, DesktopTray, hideToTray } from './tray';
@@ -193,4 +216,132 @@ test('tray recreation uses the current unread state', () => {
   tray.setUnread(false);
   tray.update(true);
   expect(trayEvents[2].image).toBe(mocks.baseIcon);
+});
+
+test('call state switches tray image and tooltip across connected, muted, deafened, and idle', () => {
+  const { tray } = setup('win32');
+  tray.update(true);
+
+  tray.setCallState('connected', 'data:image/png;base64,connected');
+  expect(trayEvents[0].setToolTip).toHaveBeenLastCalledWith('Sable — Connected');
+  expect(trayEvents[0].setImage).toHaveBeenLastCalledWith(
+    mocks.createFromDataURL.mock.results[0].value
+  );
+
+  tray.setCallState('connected', 'data:image/png;base64,connected');
+  expect(trayEvents[0].setImage).toHaveBeenCalledTimes(1);
+
+  tray.setCallState('muted', 'data:image/png;base64,muted');
+  expect(trayEvents[0].setToolTip).toHaveBeenLastCalledWith('Sable — Muted');
+  expect(trayEvents[0].setImage).toHaveBeenLastCalledWith(
+    mocks.createFromDataURL.mock.results[1].value
+  );
+
+  tray.setCallState('deafened', 'data:image/png;base64,deafened');
+  expect(trayEvents[0].setToolTip).toHaveBeenLastCalledWith('Sable — Deafened');
+  expect(trayEvents[0].setImage).toHaveBeenLastCalledWith(
+    mocks.createFromDataURL.mock.results[2].value
+  );
+
+  tray.setCallState('idle', null);
+  expect(trayEvents[0].setToolTip).toHaveBeenLastCalledWith('Sable');
+  expect(trayEvents[0].setImage).toHaveBeenLastCalledWith(mocks.baseIcon);
+});
+
+test('unread dot composites onto the active call icon and reverts cleanly on idle', () => {
+  const { tray } = setup('linux');
+  tray.update(true);
+
+  tray.setCallState('muted', 'data:image/png;base64,muted');
+  tray.setUnread(true);
+  const [mutedUnreadBitmap, mutedUnreadSize] = mocks.createFromBitmap.mock.calls[0];
+  expect(mutedUnreadSize).toEqual({ width: 64, height: 64 });
+  expect([...mutedUnreadBitmap.subarray(0, 4)]).toEqual([50, 50, 50, 50]);
+  expect(trayEvents[0].setImage).toHaveBeenLastCalledWith(
+    mocks.createFromBitmap.mock.results[0].value
+  );
+
+  tray.setCallState('idle', null);
+  const [, idleUnreadSize] = mocks.createFromBitmap.mock.calls[1];
+  expect(idleUnreadSize).toEqual({ width: 32, height: 32 });
+  expect(trayEvents[0].setImage).toHaveBeenLastCalledWith(
+    mocks.createFromBitmap.mock.results[1].value
+  );
+});
+
+test('tray recreation preserves call state and empty data URLs fall back to baseIcon', () => {
+  const { tray } = setup('win32');
+  tray.setCallState('deafened', 'data:image/png;base64,deafened');
+  tray.update(true);
+  expect(trayEvents[0].image).toBe(mocks.createFromDataURL.mock.results[0].value);
+  expect(trayEvents[0].setToolTip).toHaveBeenLastCalledWith('Sable — Deafened');
+
+  tray.update(false);
+  tray.update(true);
+  expect(trayEvents[1].image).toBe(mocks.createFromDataURL.mock.results[0].value);
+  expect(trayEvents[1].setToolTip).toHaveBeenLastCalledWith('Sable — Deafened');
+
+  tray.setCallState('connected', 'invalid-url');
+  expect(trayEvents[1].setToolTip).toHaveBeenLastCalledWith('Sable — Connected');
+  expect(trayEvents[1].setImage).toHaveBeenLastCalledWith(mocks.baseIcon);
+});
+
+test('speaking state updates tooltip and caches decoded call icons across transitions', () => {
+  const { tray } = setup('win32');
+  tray.update(true);
+
+  tray.setCallState('connected', 'data:image/png;base64,silent');
+  expect(mocks.createFromDataURL).toHaveBeenCalledTimes(1);
+  expect(trayEvents[0].setToolTip).toHaveBeenLastCalledWith('Sable — Connected');
+
+  tray.setCallState('speaking', 'data:image/png;base64,speaking');
+  expect(mocks.createFromDataURL).toHaveBeenCalledTimes(2);
+  expect(trayEvents[0].setToolTip).toHaveBeenLastCalledWith('Sable — Speaking');
+  expect(trayEvents[0].setImage).toHaveBeenLastCalledWith(
+    mocks.createFromDataURL.mock.results[1].value
+  );
+
+  tray.setCallState('connected', 'data:image/png;base64,silent');
+  expect(mocks.createFromDataURL).toHaveBeenCalledTimes(2);
+  expect(trayEvents[0].setToolTip).toHaveBeenLastCalledWith('Sable — Connected');
+  expect(trayEvents[0].setImage).toHaveBeenLastCalledWith(
+    mocks.createFromDataURL.mock.results[0].value
+  );
+});
+
+test('Windows tray writes and caches multi-resolution .ico files and refreshes on DPI changes', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sable-tray-ico-'));
+  try {
+    const tray = new DesktopTray(
+      '/icon.ico',
+      () =>
+        ({
+          isDestroyed: () => false,
+          isVisible: () => true,
+          isMinimized: () => false,
+        }) as unknown as BrowserWindow,
+      'win32',
+      dir
+    );
+    tray.update(true);
+
+    tray.setCallState('speaking', 'data:image/png;base64,speaking-hi');
+    const icoPath = join(dir, 'tray-call-speaking.ico');
+    const icoBytes = readFileSync(icoPath);
+    expect(icoBytes.readUInt16LE(0)).toBe(0);
+    expect(icoBytes.readUInt16LE(2)).toBe(1);
+    expect(icoBytes.readUInt16LE(4)).toBe(9);
+    expect(trayEvents[0].setImage).toHaveBeenLastCalledWith(expect.objectContaining({ icoPath }));
+
+    const pathCallsAfterFirst = mocks.createFromPath.mock.calls.length;
+    tray.setCallState('connected', 'data:image/png;base64,silent-hi');
+    tray.setCallState('speaking', 'data:image/png;base64,speaking-hi');
+    expect(mocks.createFromPath.mock.calls.length).toBe(pathCallsAfterFirst + 1);
+
+    const imageCallsBeforeRefresh = trayEvents[0].setImage.mock.calls.length;
+    tray.refresh();
+    expect(trayEvents[0].setImage).toHaveBeenCalledTimes(imageCallsBeforeRefresh + 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
