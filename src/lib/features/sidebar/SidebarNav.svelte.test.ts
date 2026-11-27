@@ -2,6 +2,7 @@ import type { RoomPermissionsView } from '#src/generated/protocol';
 // @vitest-environment happy-dom
 
 import { render, screen, within } from '@testing-library/svelte';
+import { userEvent } from '@testing-library/user-event';
 import { tick } from 'svelte';
 import { afterEach, beforeEach, expect, onTestFinished, test, vi } from 'vitest';
 
@@ -18,8 +19,12 @@ vi.mock('$app/navigation', () => import('#lib/test-support/app-navigation.js'));
 vi.mock('#lib/features/call/call-telemetry.js', () => ({ CallTelemetry: vi.fn() }));
 
 import { visit } from '#lib/test-support/app-state.js';
-import { navigated } from '#lib/test-support/app-navigation.js';
+import { goto, navigated } from '#lib/test-support/app-navigation.js';
 vi.mock('#lib/i18n.js', () => import('#lib/test-support/i18n.js'));
+vi.mock('#lib/config/runtime-config.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('#lib/config/runtime-config.js')>()),
+  runtimeConfig: vi.fn(() => Promise.resolve({ calls: { livekitServiceUrl: null } })),
+}));
 const fixture = vi.hoisted(() => ({
   roomList: null as RoomList | null,
   call: null as CallSession | null,
@@ -505,3 +510,113 @@ test('a section totals its notifying rooms in green', async () => {
     'unread-badge-highlight'
   );
 });
+
+test.each([false, true])(
+  'single-clicking a voice room joins in place and second click opens stage (mobile: %s)',
+  async (mobile) => {
+    const realRtc = globalThis.RTCPeerConnection;
+    globalThis.RTCPeerConnection = vi.fn() as unknown as typeof RTCPeerConnection;
+    onTestFinished(() => {
+      globalThis.RTCPeerConnection = realRtc;
+      core.rpc.room_state.rules.mockReset();
+      core.rpc.calls.support.mockReset();
+      goto.mockClear();
+    });
+    core.rpc.room_state.rules.mockResolvedValue(null);
+    core.rpc.calls.support.mockResolvedValue({
+      supported: true,
+      can_join: true,
+      has_focus: true,
+    } as never);
+
+    const general: RoomListItemView = withCounts({
+      ...space('!general:example.org', 'General'),
+      room_kind: 'text',
+    });
+    const voiceA: RoomListItemView = withCounts({
+      ...space('!voice-a:example.org', 'Voice A'),
+      room_kind: 'voice',
+    });
+    const voiceB: RoomListItemView = withCounts({
+      ...space('!voice-b:example.org', 'Voice B'),
+      room_kind: 'voice',
+    });
+    const { client, emit } = fixtureCore([general, voiceA, voiceB]);
+    await startRoomList(client);
+    emit(
+      sectionsUpdate([
+        sectionView('unspaced', {
+          rooms: [general.room_id, voiceA.room_id, voiceB.room_id],
+        }),
+      ])
+    );
+
+    const call = new CallSession(client);
+    fixture.call = call;
+    const switchSpy = vi.spyOn(call, 'switchTo').mockImplementation((targetId) => {
+      call.roomId = targetId;
+      call.lifecycle = 'active';
+      return Promise.resolve();
+    });
+
+    visit('/rooms/!general%3Aexample.org', { roomId: '!general:example.org' });
+    const onNavigate = vi.fn();
+    render(SidebarNav, { mobile, onNavigate });
+    await tick();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('treeitem', { name: 'Voice A' }));
+    await vi.waitFor(() => {
+      expect(switchSpy).toHaveBeenCalledTimes(1);
+    });
+    expect(switchSpy).toHaveBeenCalledWith(
+      voiceA.room_id,
+      { microphone: true, camera: false },
+      null
+    );
+    expect(onNavigate).not.toHaveBeenCalled();
+    expect(goto).not.toHaveBeenCalled();
+
+    // Switching to Voice B while viewing #general stays on #general.
+    await user.click(screen.getByRole('treeitem', { name: 'Voice B' }));
+    await vi.waitFor(() => {
+      expect(switchSpy).toHaveBeenCalledTimes(2);
+    });
+    expect(switchSpy).toHaveBeenLastCalledWith(
+      voiceB.room_id,
+      { microphone: true, camera: false },
+      null
+    );
+    expect(onNavigate).not.toHaveBeenCalled();
+
+    // Clicking the already-active Voice B opens its stage.
+    await tick();
+    await user.click(screen.getByRole('treeitem', { name: 'Voice B' }));
+    expect(onNavigate).toHaveBeenCalledWith('/rooms/!voice-b%3Aexample.org');
+
+    // Switching to Voice A while viewing Voice B's stage follows along to Voice A.
+    visit('/rooms/!voice-b%3Aexample.org', { roomId: '!voice-b:example.org' });
+    navigated();
+    await tick();
+    onNavigate.mockClear();
+
+    await user.click(screen.getByRole('treeitem', { name: 'Voice A' }));
+    await vi.waitFor(() => {
+      expect(switchSpy).toHaveBeenCalledTimes(3);
+    });
+    expect(onNavigate).toHaveBeenCalledWith('/rooms/!voice-a%3Aexample.org');
+
+    // Blocked preflight navigates to Voice B without dropping the active Voice A call.
+    core.rpc.calls.support.mockResolvedValueOnce({
+      supported: true,
+      can_join: false,
+      has_focus: true,
+    } as never);
+    onNavigate.mockClear();
+    await user.click(screen.getByRole('treeitem', { name: 'Voice B' }));
+    await vi.waitFor(() => {
+      expect(onNavigate).toHaveBeenCalledWith('/rooms/!voice-b%3Aexample.org');
+    });
+    expect(switchSpy).toHaveBeenCalledTimes(3);
+  }
+);

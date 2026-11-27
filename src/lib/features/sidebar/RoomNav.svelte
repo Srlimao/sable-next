@@ -29,6 +29,7 @@
   import ActionMenuItem from '#lib/ui/primitives/ActionMenuItem.svelte';
   import { cursorAnchor, type CursorAnchor } from '#lib/ui/cursor-anchor.js';
   import { longPress, mouseContextMenu } from '#lib/ui/long-press.svelte.js';
+  import { isPlainClick } from '#lib/ui/plain-click.js';
   import { isDeclining } from '#lib/rooms/invites.svelte.js';
   import { dismissedInvites } from '#lib/rooms/dismissed-invites.svelte.js';
   import { usePresenceStore } from '#lib/rooms/presence.svelte.js';
@@ -188,6 +189,7 @@
     spaceId?: string;
     roomId?: string;
     onNavigate?: (href: string) => void;
+    onJoinVoice?: (room: RoomListItemView, href: string) => void;
     width?: number;
     collapsed?: boolean;
     callRoomId?: string | null;
@@ -203,6 +205,7 @@
     spaceId = page.params.spaceId,
     roomId = page.params.roomId,
     onNavigate,
+    onJoinVoice,
     width,
     collapsed = false,
     callRoomId = null,
@@ -318,6 +321,25 @@
     } else {
       goToPage(href);
     }
+  }
+
+  function handleRoomClick(
+    event: MouseEvent,
+    room: RoomListItemView | undefined,
+    href: string
+  ): void {
+    if (
+      room?.room_kind === 'voice' &&
+      room.state === 'joined' &&
+      onJoinVoice &&
+      isPlainClick(event) &&
+      callRoomId !== room.room_id
+    ) {
+      event.preventDefault();
+      onJoinVoice(room, href);
+      return;
+    }
+    onNavigate?.(href);
   }
 
   function openLobby(room: RoomListItemView): void {
@@ -479,7 +501,8 @@
     }
 
     if (row.parentSpaceId) {
-      const parentSpace = findRoomByPathId(roomList.rooms, row.parentSpaceId);
+      const parentSpace =
+        roomList.byId(row.parentSpaceId) ?? findRoomByPathId(roomList.rooms, row.parentSpaceId);
       return resolve('/(app)/space/[spaceId]/[roomId]', {
         spaceId: parentSpace
           ? roomPathParam(parentSpace, roomList.rooms)
@@ -640,7 +663,7 @@
           ]}
           {href}
           style:--room-depth={collapsed ? 0 : item.depth}
-          onclick={() => onNavigate?.(href)}
+          onclick={(event) => handleRoomClick(event, room, href)}
           aria-label={collapsed
             ? countLabel
               ? `${roomLabel}, ${countLabel}`

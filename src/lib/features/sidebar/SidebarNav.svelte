@@ -3,12 +3,14 @@
   import { i18n } from '#lib/i18n.js';
   import { readText, writeText } from '#lib/platform/local-json.js';
   import type { RoomListItemView } from '#src/generated/protocol';
-  import { onMount } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import { afterNavigate, goto } from '$app/navigation';
   import { page } from '$app/state';
   import { useCoreClient } from '#lib/core/context.js';
   import ActiveCallBar from '#lib/features/call/ActiveCallBar.svelte';
   import { useCallSession } from '#lib/features/call/call-session.svelte.js';
+  import { VoiceQuickJoin } from '#lib/features/call/voice-quick-join.js';
+  import { goToPage } from '#lib/features/room/room-navigation.js';
   import { roomSectionPath } from '#lib/rooms/permalink.js';
   import { findRoomByPathId, useRoomList } from '#lib/rooms/room-list.svelte.js';
   import { addUnread, spacesContaining } from '#lib/rooms/spaces.js';
@@ -208,6 +210,20 @@
     );
   }
 
+  const voiceQuickJoin = new VoiceQuickJoin({
+    core,
+    call,
+    isViewingVoiceCallStage: (previousCallRoomId) =>
+      openRoomId === previousCallRoomId && roomList.byId(previousCallRoomId)?.room_kind === 'voice',
+    navigate: (href) => {
+      if (onNavigate) onNavigate(href);
+      else goToPage(href);
+    },
+  });
+  onDestroy(() => {
+    voiceQuickJoin.cancel();
+  });
+
   const railProps = {
     get layout() {
       return entries;
@@ -310,6 +326,7 @@
           {spaceId}
           {roomId}
           {onNavigate}
+          onJoinVoice={(room, href) => void voiceQuickJoin.join(room, href)}
           callRoomId={call.active ? call.roomId : null}
           {callParticipants}
           callVoiceStates={call.voiceStates}
@@ -341,8 +358,10 @@
           {pathname}
           {spaceId}
           {roomId}
+          {onNavigate}
           width={roomNavWidth}
           {collapsed}
+          onJoinVoice={(room, href) => void voiceQuickJoin.join(room, href)}
           callRoomId={call.active ? call.roomId : null}
           {callParticipants}
           callVoiceStates={call.voiceStates}

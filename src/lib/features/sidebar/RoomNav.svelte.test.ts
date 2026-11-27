@@ -1781,3 +1781,92 @@ test('a space can hide bridge badges on its rooms for every member', async () =>
   core.rpc.room_state.event.mockReset();
   core.rpc.room_state.event.mockResolvedValue(null);
 });
+
+test('plain-clicking a joined voice room calls onJoinVoice and prevents navigation', async () => {
+  visit('/rooms');
+  const voice = makeRoom({ room_id: '!voice:example.org', name: 'Lounge', room_kind: 'voice' });
+  const text = makeRoom({ room_id: '!text:example.org', name: 'General', room_kind: 'text' });
+  roomsFixture.rooms = [voice, text];
+  const onJoinVoice = vi.fn();
+  const onNavigate = vi.fn();
+  await mountNav({ onJoinVoice, onNavigate });
+
+  const voiceLink = row('Lounge');
+  let voiceDefaultPrevented: boolean | undefined;
+  window.addEventListener(
+    'click',
+    (event) => {
+      voiceDefaultPrevented = event.defaultPrevented;
+    },
+    { once: true }
+  );
+
+  await user.click(voiceLink);
+  expect(voiceDefaultPrevented).toBe(true);
+  expect(onJoinVoice).toHaveBeenCalledWith(voice, '/rooms/!voice%3Aexample.org');
+  expect(onNavigate).not.toHaveBeenCalled();
+
+  await user.click(row('General'));
+  expect(onJoinVoice).toHaveBeenCalledTimes(1);
+  expect(onNavigate).toHaveBeenCalledWith('/rooms/!text%3Aexample.org');
+});
+
+test('modifier-clicking or clicking the already-connected voice room navigates normally', async () => {
+  visit('/rooms');
+  const voice = makeRoom({ room_id: '!voice:example.org', name: 'Lounge', room_kind: 'voice' });
+  roomsFixture.rooms = [voice];
+  const onJoinVoice = vi.fn();
+  const onNavigate = vi.fn();
+  await mountNav({ onJoinVoice, onNavigate, callRoomId: null });
+
+  const voiceLink = row('Lounge');
+  let ctrlPrevented: boolean | undefined;
+  window.addEventListener(
+    'click',
+    (event) => {
+      ctrlPrevented = event.defaultPrevented;
+      event.preventDefault();
+    },
+    { once: true }
+  );
+  await user.keyboard('{Control>}');
+  await user.click(voiceLink);
+  await user.keyboard('{/Control}');
+
+  expect(ctrlPrevented).toBe(false);
+  expect(onJoinVoice).not.toHaveBeenCalled();
+  expect(onNavigate).toHaveBeenCalledWith('/rooms/!voice%3Aexample.org');
+
+  onNavigate.mockClear();
+  await mountNav({ onJoinVoice, onNavigate, callRoomId: '!voice:example.org' });
+  const activeVoiceLink = screen.getAllByRole('treeitem', { name: /^Lounge/ })[1];
+  let secondClickPrevented: boolean | undefined;
+  window.addEventListener(
+    'click',
+    (event) => {
+      secondClickPrevented = event.defaultPrevented;
+      event.preventDefault();
+    },
+    { once: true }
+  );
+  await user.click(activeVoiceLink);
+  expect(secondClickPrevented).toBe(false);
+  expect(onJoinVoice).not.toHaveBeenCalled();
+  expect(onNavigate).toHaveBeenCalledWith('/rooms/!voice%3Aexample.org');
+});
+
+test('hover chat button on a voice room still opens chat without triggering onJoinVoice', async () => {
+  visit('/rooms');
+  const voice = makeRoom({ room_id: '!voice:example.org', name: 'Lounge', room_kind: 'voice' });
+  roomsFixture.rooms = [voice];
+  const onJoinVoice = vi.fn();
+  const onNavigate = vi.fn();
+  await mountNav({ onJoinVoice, onNavigate });
+
+  const chatButton = document.querySelector('button[aria-label="call.showChat"]');
+  expect(chatButton).toBeInstanceOf(HTMLButtonElement);
+  await user.click(chatButton as HTMLButtonElement);
+
+  expect(onJoinVoice).not.toHaveBeenCalled();
+  expect(onNavigate).toHaveBeenCalledWith('/rooms/!voice%3Aexample.org');
+});

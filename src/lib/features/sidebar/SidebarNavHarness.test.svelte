@@ -5,13 +5,14 @@
 
   interface Props {
     mobile?: boolean;
+    onNavigate?: (href: string) => void;
   }
 
-  let { mobile }: Props = $props();
+  let { mobile, onNavigate }: Props = $props();
 
   provideAlertProviders([]);
 </script>
 
 <TooltipProvider>
-  <SidebarNav {mobile} />
+  <SidebarNav {mobile} {onNavigate} />
 </TooltipProvider>

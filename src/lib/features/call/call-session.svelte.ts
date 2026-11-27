@@ -179,7 +179,10 @@ export class CallSession {
   #transportConnection: CallTransportState['connection'] | undefined;
   #transportErrorCode: string | undefined;
   #teardownPromise: Promise<void> | undefined;
+  #leavePromise: Promise<void> | undefined;
   #attemptGeneration = 0;
+  #switchGeneration = 0;
+  #pendingDeafened = false;
   #backendEnded = false;
   #ownKey: { resolve: () => void; reject: (error: Error) => void } | undefined;
   #telemetry: CallTelemetry | undefined;
@@ -253,11 +256,17 @@ export class CallSession {
     return this.lifecycle !== 'idle' && this.lifecycle !== 'failed';
   }
 
-  async join(roomId: string, media: CallMedia, serviceUrl: string | null = null): Promise<void> {
+  async join(
+    roomId: string,
+    media: CallMedia,
+    serviceUrl: string | null = null,
+    options?: { deafened?: boolean }
+  ): Promise<void> {
     if (this.active) return;
 
     const lease = acquireCallOwner('livekit-js', roomId);
     if (!lease) {
+      this.roomId = roomId;
       this.#fail('busy');
       return;
     }
@@ -265,6 +274,7 @@ export class CallSession {
     this.#lease = lease;
     this.#lastJoin = { roomId, media, serviceUrl };
     this.microphoneEnabled = media.microphone;
+    this.deafened = options?.deafened ?? false;
     this.inputMode = hasNativeCalls() ? 'voice-activity' : preferences.callInputMode;
     setPreference('callMicrophoneMuted', !media.microphone);
     this.layout = { pinned: null, gridForced: false };
@@ -502,17 +512,51 @@ export class CallSession {
   }
 
   async leave(): Promise<void> {
-    if (this.lifecycle === 'idle') return;
-    ++this.#attemptGeneration;
-    this.lifecycle = 'leaving';
-    await this.#teardown();
-    this.#telemetry?.finish('cancelled');
-    this.lifecycle = 'idle';
-    this.failure = null;
-    this.roomId = null;
-    this.connectedAt = null;
-    this.clearDeviceError();
-    this.#cue('call_leave');
+    ++this.#switchGeneration;
+    this.#pendingDeafened = false;
+    await this.#leaveSession();
+  }
+
+  /** Leave any active or failed call and join `roomId`, preserving deafened state across switches. */
+  async switchTo(
+    roomId: string,
+    media: CallMedia,
+    serviceUrl: string | null = null
+  ): Promise<void> {
+    if (this.active && this.roomId === roomId) return;
+    const token = ++this.#switchGeneration;
+    const keepDeafened = (this.active && this.deafened) || this.#pendingDeafened;
+    this.#pendingDeafened = keepDeafened;
+    if (this.lifecycle === 'failed') {
+      this.clearFailure();
+    } else if (this.active) {
+      await this.#leaveSession();
+      if (token !== this.#switchGeneration) return;
+    }
+    this.#pendingDeafened = false;
+    await this.join(roomId, media, serviceUrl, { deafened: keepDeafened });
+  }
+
+  #leaveSession(): Promise<void> {
+    if (this.lifecycle === 'idle') return Promise.resolve();
+    if (this.#leavePromise) return this.#leavePromise;
+    this.#leavePromise = (async () => {
+      try {
+        ++this.#attemptGeneration;
+        this.lifecycle = 'leaving';
+        await this.#teardown();
+        this.#telemetry?.finish('cancelled');
+        this.lifecycle = 'idle';
+        this.failure = null;
+        this.roomId = null;
+        this.connectedAt = null;
+        this.clearDeviceError();
+        this.#cue('call_leave');
+      } finally {
+        this.#leavePromise = undefined;
+      }
+    })();
+    return this.#leavePromise;
   }
 
   clearFailure(): void {

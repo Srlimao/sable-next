@@ -1531,3 +1531,129 @@ test('a non-fatal signaling error stays a breadcrumb', async () => {
   expect(session.lifecycle).toBe('active');
   expect(sentry.captureException).not.toHaveBeenCalled();
 });
+
+test('a busy join failure records the attempted roomId', async () => {
+  const { client, transport } = harness();
+  const first = new CallSession(client, { createTransport: () => transport });
+  await first.join('!room:example.org', { microphone: true, camera: false });
+
+  const second = new CallSession(client, { createTransport: () => transport });
+  await second.join('!other:example.org', { microphone: true, camera: false });
+
+  expect(second.failure).toBe('busy');
+  expect(second.roomId).toBe('!other:example.org');
+});
+
+test('switchTo joins immediately when idle and clears a previous failure', async () => {
+  const { client, transport } = harness({ joinError: new Error('nope') });
+  const session = new CallSession(client, { createTransport: () => transport });
+  await session.join('!bad:example.org', { microphone: true, camera: false });
+  expect(session.lifecycle).toBe('failed');
+
+  const ok = harness();
+  const clean = new CallSession(ok.client, { createTransport: () => ok.transport });
+  await clean.switchTo('!voice-a:example.org', { microphone: true, camera: false });
+  expect(clean.lifecycle).toBe('active');
+  expect(clean.roomId).toBe('!voice-a:example.org');
+  expect(clean.deafened).toBe(false);
+
+  clean.failure = 'setup-failed';
+  clean.lifecycle = 'failed';
+  await clean.leave();
+  // Simulate failed state directly and verify switchTo clears it and joins.
+  const retryable = new CallSession(ok.client, { createTransport: () => ok.transport });
+  retryable.lifecycle = 'failed';
+  retryable.failure = 'setup-failed';
+  retryable.roomId = '!old:example.org';
+  await retryable.switchTo('!voice-b:example.org', { microphone: true, camera: false });
+  expect(retryable.lifecycle).toBe('active');
+  expect(retryable.failure).toBeNull();
+  expect(retryable.roomId).toBe('!voice-b:example.org');
+});
+
+test('switchTo is a no-op when already active in the target room', async () => {
+  const { client, transport, joinCall } = harness();
+  const session = new CallSession(client, { createTransport: () => transport });
+  await session.join('!voice-a:example.org', { microphone: true, camera: false });
+
+  await session.switchTo('!voice-a:example.org', { microphone: true, camera: false });
+
+  expect(joinCall).toHaveBeenCalledOnce();
+  expect(transport.disconnect).not.toHaveBeenCalled();
+});
+
+test('switchTo preserves deafened state across room switches and suppresses mic', async () => {
+  const { client, transport, joinCall, leaveCall } = harness();
+  const session = new CallSession(client, { createTransport: () => transport });
+  await session.join('!voice-a:example.org', { microphone: true, camera: false });
+  session.setDeafened(true);
+  expect(session.deafened).toBe(true);
+
+  await session.switchTo('!voice-b:example.org', { microphone: true, camera: false });
+
+  expect(leaveCall).toHaveBeenCalledOnce();
+  expect(joinCall).toHaveBeenCalledTimes(2);
+  expect(session.lifecycle).toBe('active');
+  expect(session.roomId).toBe('!voice-b:example.org');
+  expect(session.deafened).toBe(true);
+  expect(transport.connect).toHaveBeenLastCalledWith(
+    expect.objectContaining({ microphoneEnabled: false })
+  );
+
+  await session.leave();
+  expect(session.deafened).toBe(false);
+});
+
+test('leave cancels an in-flight switchTo and resets deafened', async () => {
+  let resolveDisconnect: (() => void) | undefined;
+  const h = harness();
+  h.transport.disconnect = vi.fn(
+    () =>
+      new Promise<void>((resolve) => {
+        resolveDisconnect = resolve;
+      })
+  );
+  const session = new CallSession(h.client, { createTransport: () => h.transport });
+  await session.join('!voice-a:example.org', { microphone: true, camera: false });
+  session.setDeafened(true);
+  sounds.played.length = 0;
+
+  const switching = session.switchTo('!voice-b:example.org', { microphone: true, camera: false });
+  const leaving = session.leave();
+  resolveDisconnect?.();
+  await Promise.all([switching, leaving]);
+
+  expect(session.lifecycle).toBe('idle');
+  expect(session.roomId).toBeNull();
+  expect(session.deafened).toBe(false);
+  expect(h.joinCall).toHaveBeenCalledOnce();
+  expect(sounds.played.filter((cue) => cue === 'call_leave')).toHaveLength(1);
+});
+
+test('rapid switchTo A -> B -> C mid-teardown lands in C with preserved deafened', async () => {
+  let resolveDisconnect: (() => void) | undefined;
+  const h = harness();
+  const originalDisconnect = h.transport.disconnect;
+  h.transport.disconnect = vi.fn(
+    () =>
+      new Promise<void>((resolve) => {
+        resolveDisconnect = resolve;
+      })
+  );
+  const session = new CallSession(h.client, { createTransport: () => h.transport });
+  await session.join('!voice-a:example.org', { microphone: true, camera: false });
+  session.setDeafened(true);
+  sounds.played.length = 0;
+
+  const switchB = session.switchTo('!voice-b:example.org', { microphone: true, camera: false });
+  const switchC = session.switchTo('!voice-c:example.org', { microphone: true, camera: false });
+  h.transport.disconnect = originalDisconnect;
+  resolveDisconnect?.();
+  await Promise.all([switchB, switchC]);
+
+  expect(session.lifecycle).toBe('active');
+  expect(session.roomId).toBe('!voice-c:example.org');
+  expect(session.deafened).toBe(true);
+  expect(h.joinCall).toHaveBeenCalledTimes(2);
+  expect(sounds.played.filter((cue) => cue === 'call_leave')).toHaveLength(1);
+});
