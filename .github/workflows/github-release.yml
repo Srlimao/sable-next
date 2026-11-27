@@ -27,9 +27,9 @@ concurrency:
 
 env:
   CARGO_INCREMENTAL: 0
-  CARGO_PROFILE_RELEASE_DEBUG: line-tables-only
-  CARGO_PROFILE_RELEASE_STRIP: none
-  CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: packed
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 16
+  CARGO_PROFILE_RELEASE_DEBUG: 'false'
+  CARGO_PROFILE_RELEASE_STRIP: symbols
   CARGO_TERM_COLOR: always
 
 jobs:
@@ -137,7 +137,6 @@ jobs:
           shopt -s nullglob
           files=(
             electron/release/*.exe
-            electron/release/*.msi
             electron/release/*.blockmap
             electron/release/latest*.yml
           )

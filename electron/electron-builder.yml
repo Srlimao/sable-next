@@ -58,7 +58,6 @@ win:
   icon: ../src-tauri/icons/icon.ico
   target:
     - nsis
-    - msi
 portable:
   artifactName: sable-${version}-${arch}-portable.${ext}
 nsis:
