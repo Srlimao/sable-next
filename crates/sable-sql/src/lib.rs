@@ -15,7 +15,7 @@ use rusqlite::{Connection, params_from_iter};
 const SCHEMA: i64 = 2;
 #[cfg(feature = "engine")]
 /// The page cache the index may use, as the memory budget it reports.
-const CACHE_KIB: i64 = 64 * 1024;
+const CACHE_KIB: i64 = 16 * 1024;
 #[cfg(feature = "engine")]
 /// What the write-ahead log shrinks back to once a large batch is checkpointed.
 const LOG_BYTES: i64 = 16 * 1024 * 1024;

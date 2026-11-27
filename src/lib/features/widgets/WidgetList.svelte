@@ -1,6 +1,7 @@
 <script lang="ts">
   import PlusIcon from 'phosphor-svelte/lib/PlusIcon';
   import GridFourIcon from 'phosphor-svelte/lib/GridFourIcon';
+  import TelevisionSimpleIcon from 'phosphor-svelte/lib/TelevisionSimpleIcon';
   import XIcon from 'phosphor-svelte/lib/XIcon';
 
   import { i18n } from '#lib/i18n.js';
@@ -18,11 +19,20 @@
     widgets: readonly RoomWidget[];
     canManage?: boolean;
     onOpen: (widgetId: string) => void;
+    onOpenWatchTogether?: () => void;
     onAdd?: (name: string, url: string) => Promise<void>;
     onRemove?: (widgetId: string) => void;
   }
 
-  let { roomId, widgets, canManage = false, onOpen, onAdd, onRemove }: Props = $props();
+  let {
+    roomId,
+    widgets,
+    canManage = false,
+    onOpen,
+    onOpenWatchTogether,
+    onAdd,
+    onRemove,
+  }: Props = $props();
 
   let pendingRemoval = $state<RoomWidget | null>(null);
   let newName = $state('');
@@ -80,6 +90,15 @@
   {/each}
 </div>
 
+{#if onOpenWatchTogether}
+  <div class="widgets-builtin">
+    <Button variant="secondary" onclick={onOpenWatchTogether}>
+      <TelevisionSimpleIcon />
+      {i18n.t('widgets.watchTogether')}
+    </Button>
+  </div>
+{/if}
+
 {#if canManage && onAdd}
   <div class="widgets-manage">
     {#if showAddForm}
@@ -133,6 +152,12 @@
 />
 
 <style>
+  .widgets-builtin {
+    border-top: var(--border-width) solid var(--surface-container-line);
+    display: grid;
+    padding: var(--space-300);
+  }
+
   .widgets-manage {
     align-self: start;
     border-top: var(--border-width) solid var(--surface-container-line);

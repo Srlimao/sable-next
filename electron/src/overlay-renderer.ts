@@ -73,6 +73,7 @@ let latest: OverlayPayload | null = null;
 let dragOffset: { x: number; y: number } | null = null;
 let dragPos: { left: number; top: number } | null = null;
 let lastReported = '';
+let lastPayloadKey = '';
 
 function visibleParticipants(payload: OverlayPayload): VoiceOverlayParticipant[] {
   const { participants } = payload.state;
@@ -289,6 +290,9 @@ window.addEventListener('keydown', (event) => {
 });
 
 window.sableOverlay?.onUpdate((payload) => {
+  const payloadKey = JSON.stringify(payload);
+  if (payloadKey === lastPayloadKey) return;
+  lastPayloadKey = payloadKey;
   if (!payload.unlocked) {
     dragOffset = null;
     dragPos = null;

@@ -26,7 +26,9 @@ const SHUTDOWN_LIMIT_MS = 5_000;
 installUploadDeadline(self);
 installFirefoxFetchLimit(self);
 const perf = new PerfStats();
-perf.instrument(globalThis);
+if (import.meta.env.DEV) {
+  perf.instrument(globalThis);
+}
 let wasmMemory: WebAssembly.Memory | undefined;
 Reflect.set(self, '__sablePerf', () => perf.snapshot(wasmMemory));
 

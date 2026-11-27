@@ -28,12 +28,22 @@ function release(core: CoreClient): void {
   if (count === 0) setFeed(core, false);
 }
 
+export function acquireWidgetFeed(core: CoreClient): () => void {
+  acquire(core);
+  let active = true;
+  return () => {
+    if (!active) return;
+    active = false;
+    release(core);
+  };
+}
+
 export function startWidgetFeed(
   core: CoreClient,
   api: ClientWidgetApi,
   driver: SableWidgetDriver
 ): () => void {
-  acquire(core);
+  const releaseFeed = acquireWidgetFeed(core);
   const unsubscribe = core.subscribeEvents((event) => {
     if (event.type === 'widget_room_event') {
       const raw = event.event as IRoomEvent;
@@ -52,6 +62,6 @@ export function startWidgetFeed(
 
   return () => {
     unsubscribe();
-    release(core);
+    releaseFeed();
   };
 }

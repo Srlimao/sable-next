@@ -100,3 +100,171 @@ test('rejects another room and unknown actions instead of staying silent', async
   ).rejects.toThrow(ScalarError);
   await expect(ask(rpc, { action: 'send_event' })).rejects.toThrow(ScalarError);
 });
+
+test('grants room v12 founders and additional creators full power in read_events and can_send_event', async () => {
+  const coCreator = '@cocreator:example.org';
+  const regular = '@regular:example.org';
+  const { rpc } = rpcWith({
+    'm.room.create': [
+      {
+        state_key: '',
+        sender: ME,
+        content: { room_version: '12', additional_creators: [coCreator] },
+      },
+    ],
+    'm.room.member': [
+      { state_key: ME, content: { membership: 'join' } },
+      { state_key: coCreator, content: { membership: 'join' } },
+      { state_key: regular, content: { membership: 'join' } },
+    ],
+    'm.room.power_levels': [{ state_key: '', content: { users: {}, state_default: 50 } }],
+  });
+
+  expect(
+    await ask(rpc, { action: 'read_events', type: 'm.room.power_levels', state_key: '' })
+  ).toEqual({
+    events: [
+      {
+        state_key: '',
+        content: {
+          users: {
+            [ME]: Number.MAX_SAFE_INTEGER,
+            [coCreator]: Number.MAX_SAFE_INTEGER,
+          },
+          state_default: 50,
+        },
+      },
+    ],
+  });
+
+  expect(
+    await ask(rpc, {
+      action: 'can_send_event',
+      event_type: 'io.element.integrations.installations',
+      is_state: true,
+    })
+  ).toBe(true);
+  expect(
+    await answerScalarRequest(rpc, ROOM, coCreator, {
+      room_id: ROOM,
+      action: 'can_send_event',
+      event_type: 'im.vector.modular.widgets',
+      is_state: true,
+    })
+  ).toBe(true);
+  await expect(
+    answerScalarRequest(rpc, ROOM, regular, {
+      room_id: ROOM,
+      action: 'can_send_event',
+      event_type: 'im.vector.modular.widgets',
+      is_state: true,
+    })
+  ).rejects.toThrow(ScalarError);
+});
+
+test('synthesizes power_levels for room v12 founders when m.room.power_levels is absent', async () => {
+  const { rpc } = rpcWith({
+    'm.room.create': [{ state_key: '', sender: ME, content: { room_version: '12' } }],
+  });
+
+  expect(
+    await ask(rpc, { action: 'read_events', type: 'm.room.power_levels', state_key: '' })
+  ).toEqual({
+    events: [
+      {
+        type: 'm.room.power_levels',
+        state_key: '',
+        content: { users: { [ME]: Number.MAX_SAFE_INTEGER } },
+      },
+    ],
+  });
+});
+
+test('does not project privileged creator power for room v11 and allows reading m.room.create', async () => {
+  const { rpc } = rpcWith({
+    'm.room.create': [{ state_key: '', sender: ME, content: { room_version: '11' } }],
+    'm.room.member': [{ state_key: ME, content: { membership: 'join' } }],
+    'm.room.power_levels': [{ state_key: '', content: { users: {}, state_default: 50 } }],
+  });
+
+  expect(await ask(rpc, { action: 'read_events', type: 'm.room.create', state_key: '' })).toEqual({
+    events: [{ state_key: '', sender: ME, content: { room_version: '11' } }],
+  });
+  expect(
+    await ask(rpc, { action: 'read_events', type: 'm.room.power_levels', state_key: '' })
+  ).toEqual({
+    events: [{ state_key: '', content: { users: {}, state_default: 50 } }],
+  });
+  await expect(
+    ask(rpc, { action: 'can_send_event', event_type: 'im.vector.modular.widgets', is_state: true })
+  ).rejects.toThrow(ScalarError);
+});
+
+test('writes and clears installation state events via send_event and rejects disallowed types', async () => {
+  const { rpc, sendEvent } = rpcWith({});
+
+  expect(
+    await ask(rpc, {
+      action: 'send_event',
+      type: 'io.element.integrations.installations',
+      state_key: 'inst-1',
+      content: {
+        installationId: 'inst-1',
+        appId: 'youtube',
+        userIds: [],
+        widgetIds: ['w1'],
+      },
+    })
+  ).toEqual({ event_id: '$sent' });
+  expect(
+    await ask(rpc, {
+      action: 'send_event',
+      type: 'io.element.integrations.installations',
+      state_key: 'inst-1',
+      content: {},
+    })
+  ).toEqual({ event_id: '$sent' });
+
+  expect(sendEvent).toHaveBeenNthCalledWith(1, {
+    room_id: ROOM,
+    event_type: 'io.element.integrations.installations',
+    state_key: 'inst-1',
+    content: {
+      installationId: 'inst-1',
+      appId: 'youtube',
+      userIds: [],
+      widgetIds: ['w1'],
+    },
+  });
+  expect(sendEvent).toHaveBeenNthCalledWith(2, {
+    room_id: ROOM,
+    event_type: 'io.element.integrations.installations',
+    state_key: 'inst-1',
+    content: {},
+  });
+
+  await expect(
+    ask(rpc, {
+      action: 'send_event',
+      type: 'm.room.power_levels',
+      state_key: '',
+      content: {},
+    })
+  ).rejects.toThrow(ScalarError);
+  await expect(
+    ask(rpc, {
+      action: 'send_event',
+      type: 'm.room.topic',
+      state_key: '',
+      content: { topic: 'nope' },
+    })
+  ).rejects.toThrow(ScalarError);
+  await expect(
+    ask(rpc, {
+      action: 'send_event',
+      type: 'io.element.integrations.installations',
+      state_key: 123,
+      content: {},
+    })
+  ).rejects.toThrow(ScalarError);
+});

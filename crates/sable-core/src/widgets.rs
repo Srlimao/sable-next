@@ -241,7 +241,6 @@ fn integration_manager_page(
     room_id: &ruma::RoomId,
 ) -> Option<String> {
     let mut url = url::Url::parse(ui_url).ok()?;
-    url.set_path("/index.html");
     {
         let mut query = url.query_pairs_mut();
         if let Some(token) = scalar_token {
@@ -252,11 +251,40 @@ fn integration_manager_page(
     Some(url.to_string())
 }
 
-fn terms_url(api_url: &str) -> String {
-    format!(
-        "{}/_matrix/integrations/v1/terms",
-        api_url.trim_end_matches('/')
-    )
+fn push_unique(urls: &mut Vec<String>, candidate: String) {
+    if !urls.contains(&candidate) {
+        urls.push(candidate);
+    }
+}
+
+fn terms_urls(api_url: &str) -> Vec<String> {
+    let base = api_url.trim_end_matches('/');
+    let mut urls = Vec::with_capacity(3);
+    push_unique(&mut urls, format!("{base}/terms"));
+    if let Ok(mut root) = url::Url::parse(api_url) {
+        root.set_query(None);
+        root.set_fragment(None);
+        root.set_path("/_matrix/integrations/v1/terms");
+        push_unique(&mut urls, root.to_string());
+    }
+    push_unique(&mut urls, format!("{base}/_matrix/integrations/v1/terms"));
+    urls
+}
+
+fn well_known_bases(homeserver: &str, server_name: Option<&str>) -> Vec<url::Url> {
+    let mut bases = Vec::with_capacity(2);
+    if let Ok(url) = url::Url::parse(homeserver) {
+        bases.push(url);
+    }
+    if let Some(name) = server_name
+        && let Ok(delegated) = url::Url::parse(&format!("https://{name}"))
+        && bases
+            .first()
+            .is_none_or(|hs| hs.origin() != delegated.origin())
+    {
+        bases.push(delegated);
+    }
+    bases
 }
 
 fn pending_policies(terms: &Value, accepted: &[String]) -> Vec<TermsPolicyView> {
@@ -820,10 +848,16 @@ impl SignedIn {
         let client = self.client();
 
         let mut managers = Vec::new();
-        if let Ok(base) = url::Url::parse(client.homeserver().as_str())
-            && let Some(well_known) = fetch_well_known(client, &base).await
-        {
-            managers = managers_from_well_known(&well_known);
+        for base in well_known_bases(
+            client.homeserver().as_str(),
+            client.user_id().map(|user| user.server_name().as_str()),
+        ) {
+            if let Some(well_known) = fetch_well_known(client, &base).await {
+                managers = managers_from_well_known(&well_known);
+                if !managers.is_empty() {
+                    break;
+                }
+            }
         }
         if let Some(widgets) = self
             .global_account_data(GlobalAccountDataEventType::from("m.widgets"), label)
@@ -844,20 +878,25 @@ impl SignedIn {
     pub(crate) async fn integration_manager_terms(&self) -> Result<Vec<TermsPolicyView>, RpcError> {
         const LABEL: &str = "integration_manager_terms";
         let manager = self.integration_manager(LABEL).await?;
-        let response = self
-            .client()
-            .http_client()
-            .raw()
-            .get(terms_url(&manager.api_url))
-            .send()
-            .await
-            .or_failed(self.core(), LABEL)?;
-        if !response.status().is_success() {
+        let http = self.client().http_client().raw();
+        let mut loaded_terms = None;
+        for url in terms_urls(&manager.api_url) {
+            let response = http.get(url).send().await.or_failed(self.core(), LABEL)?;
+            if response.status().is_success() {
+                let parsed: Value =
+                    serde_json::from_str(&response.text().await.or_failed(self.core(), LABEL)?)
+                        .or_failed(self.core(), LABEL)?;
+                loaded_terms = Some(parsed);
+                break;
+            }
+            if response.status() == reqwest::StatusCode::NOT_FOUND {
+                continue;
+            }
             return Ok(Vec::new());
         }
-        let terms: Value =
-            serde_json::from_str(&response.text().await.or_failed(self.core(), LABEL)?)
-                .or_failed(self.core(), LABEL)?;
+        let Some(terms) = loaded_terms else {
+            return Ok(Vec::new());
+        };
 
         let accepted = self.accepted_terms(LABEL).await?;
         let pending = pending_policies(&terms, &accepted);
@@ -901,18 +940,27 @@ impl SignedIn {
             self.core()
                 .failed(LABEL, "the integration manager did not issue a token")
         })?;
-
-        self.client()
-            .http_client()
-            .raw()
-            .post(terms_url(&manager.api_url))
-            .bearer_auth(token)
-            .header("Content-Type", "application/json")
-            .body(serde_json::json!({ "user_accepts": urls }).to_string())
-            .send()
-            .await
-            .and_then(reqwest::Response::error_for_status)
-            .or_failed(self.core(), LABEL)?;
+        let body = serde_json::json!({ "user_accepts": urls }).to_string();
+        let http = self.client().http_client().raw();
+        let mut last_response = None;
+        for endpoint in terms_urls(&manager.api_url) {
+            let response = http
+                .post(endpoint)
+                .bearer_auth(&token)
+                .header("Content-Type", "application/json")
+                .body(body.clone())
+                .send()
+                .await
+                .or_failed(self.core(), LABEL)?;
+            let status = response.status();
+            last_response = Some(response);
+            if status != reqwest::StatusCode::NOT_FOUND {
+                break;
+            }
+        }
+        if let Some(response) = last_response {
+            response.error_for_status().or_failed(self.core(), LABEL)?;
+        }
 
         self.update_account_data(&["m.accepted_terms"], LABEL, async |current| {
             let mut accepted = accepted_urls(current);

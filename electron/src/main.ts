@@ -42,6 +42,8 @@ import { AuthLoopback } from './auth-loopback';
 import { CallShortcuts, validBindings } from './call-shortcuts';
 import { VoiceOverlayManager } from './voice-overlay';
 import { sanitizeOverlayConfig, sanitizeOverlayState } from './voice-overlay-layout';
+import { applyYoutubeEmbedReferer, YOUTUBE_EMBED_URLS } from './youtube-referer';
+import { fetchYoutubeShortsSequence } from './youtube-shorts';
 import type { VoiceOverlayAction } from '../../src/lib/platform/voice-overlay-types';
 import type { TrayCallStatus } from '../../src/lib/platform/tray-call-types';
 import { autostartAvailable, setLaunchAtLogin } from './autostart';
@@ -946,6 +948,18 @@ ipcMain.handle('sable-read-theme-file', (event, path: unknown, since: unknown) =
   return readThemeFile(path, typeof since === 'number' ? since : null);
 });
 
+ipcMain.handle('sable-youtube-shorts-sequence', async (event, raw: unknown) => {
+  if (!isAppFrame(event.senderFrame) || typeof raw !== 'object' || raw === null) {
+    return { videoIds: [], continuation: null };
+  }
+  const { videoId, continuation } = raw as { videoId?: unknown; continuation?: unknown };
+  if (typeof videoId !== 'string') return { videoIds: [], continuation: null };
+  return fetchYoutubeShortsSequence({
+    videoId,
+    continuation: typeof continuation === 'string' ? continuation : null,
+  });
+});
+
 ipcMain.handle('sable-save-file', async (event, request: unknown) => {
   if (!isAppFrame(event.senderFrame)) return null;
   const { name, bytes, filters, askLocation } = (request ?? {}) as Partial<SaveFileRequest>;
@@ -1000,7 +1014,7 @@ function pickScreenSource(sources: DesktopCapturerSource[]): Promise<string | nu
 
 async function chooseShareSource(): Promise<DesktopCapturerSource | undefined> {
   // Enumeration requests macOS consent; a status check alone does not.
-  const thumbnailSize = isWayland ? { width: 1920, height: 1080 } : { width: 320, height: 180 };
+  const thumbnailSize = isWayland ? { width: 0, height: 0 } : { width: 320, height: 180 };
   const sources = await desktopCapturer
     .getSources({ types: ['screen', 'window'], thumbnailSize })
     .catch((error: unknown) => {
@@ -1121,6 +1135,12 @@ if (!app.requestSingleInstanceLock()) {
     });
     core = startCore();
     protocol.handle(SCHEME, serveApp);
+    session.defaultSession.webRequest.onBeforeSendHeaders(
+      { urls: YOUTUBE_EMBED_URLS },
+      (details, callback) => {
+        callback({ requestHeaders: applyYoutubeEmbedReferer(details.requestHeaders) });
+      }
+    );
     enforcePermissions(
       session.defaultSession,
       join(app.getPath('userData'), 'permissions.json'),

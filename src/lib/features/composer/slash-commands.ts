@@ -4,6 +4,7 @@ import type {
   PerMessageProfileView,
   PersonaView,
   SlashInvocation,
+  SlashParse,
   Rpc,
 } from '#src/generated/protocol';
 import { isCoreError } from '#src/transport';
@@ -12,7 +13,12 @@ import { knockRoom, openDirectMessage } from '#lib/core/api/rooms.js';
 import type { E2eePolicy } from '#lib/deployment/e2ee-policy.js';
 import { setMemberLook } from '#lib/core/api/members.js';
 import { joinOrOfferKnock } from '#lib/rooms/join-or-knock.js';
-import { parseSlash } from '#lib/model/model.js';
+import {
+  parseSlash as modelParseSlash,
+  pronounSets,
+  slashCommandNames as modelSlashCommandNames,
+} from '#lib/model/model.js';
+import { parseYoutubeInput } from '#lib/features/widgets/watch-together/youtube-source.js';
 import { matrixLinkHost, parseMatrixLink } from '#lib/rooms/matrix-link.js';
 import { currentFix } from '#lib/platform/geolocation.js';
 import { preferences } from '#lib/settings/preferences.svelte.js';
@@ -21,7 +27,38 @@ import { geoUriFor } from './composer-location.js';
 import { rainbowFormatted, rainbowHtml } from './rainbow.js';
 import { isRecord } from '#lib/guards.js';
 
-export { parseSlash, pronounSets, slashCommandNames } from '#lib/model/model.js';
+export { pronounSets };
+
+const WATCH_SLASH_RE = /^\/watch(?:\s+([\s\S]*))?$/i;
+
+function parseWatchSlash(body: string): { arg: string | null } | null {
+  const match = WATCH_SLASH_RE.exec(body.trim());
+  if (!match) return null;
+  const arg = match[1]?.trim() ?? '';
+  return { arg: arg === '' ? null : arg };
+}
+
+export function slashCommandNames(): string[] {
+  const names = modelSlashCommandNames();
+  return names.includes('watch') ? names : [...names, 'watch'];
+}
+
+export function parseSlash(
+  body: string,
+  formatted: string | null,
+  linkHost: string,
+  now = Date.now()
+): SlashParse {
+  if (parseWatchSlash(body) !== null) {
+    return {
+      kind: 'command',
+      name: 'watch',
+      developer_only: false,
+      invocation: { command: 'watch' } as unknown as SlashInvocation,
+    };
+  }
+  return modelParseSlash(body, formatted, linkHost, now);
+}
 
 export type SlashAccountApi = Pick<
   Rpc['account'],
@@ -60,6 +97,7 @@ export type SlashOutcome =
       verbatim?: boolean;
     }
   | { kind: 'gifSearch'; query: string }
+  | { kind: 'watchTogether'; url: string | null }
   | { kind: 'bugReport' }
   | { kind: 'knock'; address: string; via: string[] }
   | { kind: 'done'; notice?: { key: string; values?: Record<string, string> } }
@@ -577,6 +615,14 @@ function spellMentions(body: string, formatted: string | null | undefined): stri
 }
 
 export async function runSlash(body: string, context: SlashContext): Promise<SlashResult> {
+  const watch = parseWatchSlash(body);
+  if (watch !== null) {
+    if (watch.arg !== null && parseYoutubeInput(watch.arg) === null) {
+      throw new SlashError(usageKey('watch'));
+    }
+    return { kind: 'watchTogether', url: watch.arg };
+  }
+
   let parsed = parseSlash(body, context.formatted ?? null, matrixLinkHost());
   if (parsed.kind === 'usage') {
     const retried = parseSlash(

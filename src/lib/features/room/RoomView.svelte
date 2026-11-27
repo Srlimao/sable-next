@@ -94,6 +94,9 @@
   import RoomVoiceChat from './RoomVoiceChat.svelte';
   import RoomSidePanels from './RoomSidePanels.svelte';
   import RoomDialogs from './RoomDialogs.svelte';
+  import WatchTogetherView from '#lib/features/widgets/watch-together/WatchTogetherView.svelte';
+  import { ensureWatchTogetherRoomWidget } from '#lib/features/widgets/watch-together/watch-together-session.svelte.js';
+  import ResizeHandle from '#lib/ui/primitives/ResizeHandle.svelte';
   import { offersCall, RoomCallSupport } from './room-call-support.svelte.js';
   import { refreshRoomMembers } from './room-member-refresh.svelte.js';
   import { mediaViewerState } from '#lib/ui/media/media-viewer-state.svelte.js';
@@ -445,6 +448,13 @@
     0.8
   );
   callStageRatio.restore();
+  const watchStageRatio = new PanelWidth(
+    'sable-watch-stage-ratio',
+    sidePanels.current ? 0.55 : 0.4,
+    0.25,
+    0.75
+  );
+  watchStageRatio.restore();
   let timelineHeight = $state(0);
   let isVoiceRoom = $derived(resolvedRoom?.room_kind === 'voice');
   const voiceChatWidth = new PanelWidth('sable-voice-chat-width', 400, 300, 1000);
@@ -1006,6 +1016,7 @@
       onReplyStep={(direction) =>
         conversation.moveReply(timelineList?.stepReply(direction) ?? null)}
       onJumpToContext={jumpToEvent}
+      onWatchTogether={(url) => panels.openWatchTogether(url)}
     />
   </div>
 {/snippet}
@@ -1018,7 +1029,6 @@
       direct={resolvedRoom?.is_direct ?? false}
       {desktop}
       widgetCount={roomSession.widgets.length}
-      {canManageWidgets}
       threadsUnread={threads.activity.size}
       threadsOnly={phone}
     />
@@ -1080,9 +1090,7 @@
           : undefined}
         onPins={phone ? () => (pinsOpen = true) : undefined}
         pinsUnread={roomPins.unread}
-        onWidgets={phone && (roomSession.widgets.length > 0 || canManageWidgets)
-          ? toggleWidgets
-          : undefined}
+        onWidgets={phone ? toggleWidgets : undefined}
         onRules={rules.view ? () => (rules.open = true) : undefined}
         onReport={() => (reportOpen = true)}
         onLeave={() => (leaveOpen = true)}
@@ -1111,6 +1119,42 @@
         members={memberLoader.members}
         onInvite={roomSession.permissions?.can_invite ? () => (inviteOpen = true) : undefined}
       />
+    {/if}
+    {#if panels.watchTogetherTheater && desktop}
+      <div class="watch-stage" style:flex-basis={`${watchStageRatio.width * 100}%`}>
+        <WatchTogetherView
+          roomId={resolvedRoomId}
+          canManage={canManageWidgets}
+          members={memberLoader.members}
+          theater
+          pendingUrl={panels.pendingWatchUrl}
+          onConsumePendingUrl={() => panels.consumePendingWatchUrl()}
+          onToggleTheater={() => panels.toggleWatchTogetherTheater()}
+          onCloseTheater={() => panels.closeWatchTogether()}
+          onEnsureRoomWidget={(fallbackUrl) =>
+            ensureWatchTogetherRoomWidget({
+              core,
+              roomId: resolvedRoomId,
+              canManage: canManageWidgets,
+              widgets: roomSession.widgets,
+              title: i18n.t('widgets.watchTogether'),
+              fallbackUrl,
+              refreshWidgets: () => roomSession.details.refreshWidgets(),
+            })}
+        />
+        <ResizeHandle
+          value={watchStageRatio.width}
+          min={watchStageRatio.min}
+          max={watchStageRatio.max}
+          label={i18n.t('widgets.watchTogether')}
+          grow="down"
+          step={0.05}
+          shiftStep={0.15}
+          fromPixels={(pixels) => (timelineHeight > 0 ? pixels / timelineHeight : 0)}
+          onResize={(next) => watchStageRatio.resize(next)}
+          onCommit={() => watchStageRatio.commit()}
+        />
+      </div>
     {/if}
     {#if voiceView}
       {#if !callShown}
@@ -1262,6 +1306,20 @@
     min-height: 0;
     min-width: 0;
     position: relative;
+  }
+
+  .watch-stage {
+    border-bottom: var(--border-width) solid var(--surface-container-line);
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: column;
+    min-height: 14rem;
+    position: relative;
+  }
+
+  .watch-stage :global(.resize-handle) {
+    bottom: -0.25rem;
+    z-index: 3;
   }
 
   .timeline.thread-covered {

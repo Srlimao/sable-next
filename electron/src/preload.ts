@@ -17,6 +17,7 @@ import type {
   VoiceOverlayRunningApp,
   VoiceOverlayState,
 } from '../../src/lib/platform/voice-overlay-types';
+import type { YoutubeShortsSequenceResult } from '../../src/lib/platform/youtube-shorts-types';
 
 interface ScreenShareCandidate {
   id: string;
@@ -172,6 +173,11 @@ contextBridge.exposeInMainWorld('sableElectron', {
     ipcRenderer.invoke('sable-pick-theme-files') as Promise<ThemeFileSnapshot[]>,
   readThemeFile: (path: string, since: number | null) =>
     ipcRenderer.invoke('sable-read-theme-file', path, since) as Promise<ThemeFileSnapshot | null>,
+  fetchYoutubeShortsSequence: (videoId: string, continuation?: string | null) =>
+    ipcRenderer.invoke('sable-youtube-shorts-sequence', {
+      videoId,
+      continuation: continuation ?? null,
+    }) as Promise<YoutubeShortsSequenceResult>,
   saveFile: (request: SaveFileRequest) =>
     ipcRenderer.invoke('sable-save-file', request) as Promise<{ path: string } | null>,
   shareFile: (request: PickedFile) =>

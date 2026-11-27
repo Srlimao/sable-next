@@ -16,7 +16,6 @@ test.each([
     direct,
     desktop: true,
     widgetCount: 0,
-    canManageWidgets: false,
   });
   expect(screen.queryAllByRole('button', { name: 'Notifications in this room' })).toHaveLength(
     count
@@ -30,7 +29,6 @@ test('a panel button shows its panel open once pressed', async () => {
     direct: false,
     desktop: true,
     widgetCount: 0,
-    canManageWidgets: false,
   });
   const threads = screen.getByRole('button', { name: 'Threads' });
 
@@ -46,7 +44,6 @@ test('the compact thread shortcut announces its unread thread count', () => {
     direct: false,
     desktop: false,
     widgetCount: 2,
-    canManageWidgets: false,
     threadsOnly: true,
     threadsUnread: 3,
   });

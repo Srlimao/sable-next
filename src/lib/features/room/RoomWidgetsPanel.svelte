@@ -1,6 +1,7 @@
 <script lang="ts">
   import { useCoreClient } from '#lib/core/context.js';
   import { i18n } from '#lib/i18n.js';
+  import { ensureWatchTogetherRoomWidget } from '#lib/features/widgets/watch-together/watch-together-session.svelte.js';
   import WidgetsPanel from '#lib/features/widgets/WidgetsPanel.svelte';
   import type { RoomMemberLoader } from '#lib/rooms/room-members.svelte.js';
   import DialogFrame from '#lib/ui/primitives/DialogFrame.svelte';
@@ -45,6 +46,18 @@
       toasts.error(i18n.t('errors.actionFailed'));
     }
   }
+
+  async function ensureWatchWidget(fallbackUrl: string): Promise<void> {
+    await ensureWatchTogetherRoomWidget({
+      core,
+      roomId,
+      canManage,
+      widgets: roomSession.widgets,
+      title: i18n.t('widgets.watchTogether'),
+      fallbackUrl,
+      refreshWidgets: () => roomSession.details.refreshWidgets(),
+    });
+  }
 </script>
 
 {#snippet panel(modal: boolean)}
@@ -55,7 +68,14 @@
     displayName={ownMember?.display_name ?? core.session?.user_id ?? ''}
     avatarUrl={ownMember?.avatar_url ?? ''}
     {canManage}
+    members={memberLoader.members}
     {modal}
+    openWatchTogether={panels.watchTogetherActive}
+    pendingWatchUrl={panels.pendingWatchUrl}
+    onConsumePendingWatchUrl={() => panels.consumePendingWatchUrl()}
+    onWatchTogetherOpened={() => panels.clearWatchTogetherOpen()}
+    onToggleTheater={desktop ? () => panels.toggleWatchTogetherTheater() : undefined}
+    onEnsureWatchWidget={ensureWatchWidget}
     onClose={closeWidgets}
     onAdd={addWidget}
     onRemove={removeWidget}

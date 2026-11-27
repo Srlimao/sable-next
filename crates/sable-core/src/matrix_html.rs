@@ -593,17 +593,21 @@ pub fn display_html(body: &str, formatted: Option<&str>) -> String {
     let Some(formatted) = formatted else {
         return render_html(body, None);
     };
+    if body.len().saturating_add(formatted.len()) > DISPLAY_HTML_CACHE_MAX_BYTES {
+        return render_html(body, Some(formatted));
+    }
     let key = (body.to_owned(), formatted.to_owned());
-    let mut cache = DISPLAY_HTML_CACHE.lock();
-    if let Some(html) = cache.get(&key) {
-        return html.clone();
+    let cached = DISPLAY_HTML_CACHE.lock().get(&key).cloned();
+    if let Some(html) = cached {
+        return html;
     }
     let html = render_html(body, Some(formatted));
-    cache.insert(key, html.clone());
+    DISPLAY_HTML_CACHE.lock().insert(key, html.clone());
     html
 }
 
-const DISPLAY_HTML_CACHE_ENTRIES: usize = 2048;
+const DISPLAY_HTML_CACHE_ENTRIES: usize = 512;
+const DISPLAY_HTML_CACHE_MAX_BYTES: usize = 16 * 1024;
 
 static DISPLAY_HTML_CACHE: LazyLock<Mutex<hashlink::LruCache<(String, String), String>>> =
     LazyLock::new(|| Mutex::new(hashlink::LruCache::new(DISPLAY_HTML_CACHE_ENTRIES)));

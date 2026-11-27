@@ -1,4 +1,7 @@
-use super::{RelationsFilter, managers_from_account_data, managers_from_well_known};
+use super::{
+    RelationsFilter, integration_manager_page, managers_from_account_data,
+    managers_from_well_known, terms_urls, well_known_bases,
+};
 use crate::{
     Core,
     api::calls::RtcLivekitEndpoint,
@@ -712,7 +715,7 @@ async fn the_integration_manager_page_carries_a_scalar_token_from_the_openid_exc
 
     assert_eq!(
         url,
-        format!("{uri}/index.html?scalar_token=s3&room_id=%21room%3Aexample.org")
+        format!("{uri}/scalar?scalar_token=s3&room_id=%21room%3Aexample.org")
     );
 }
 
@@ -971,4 +974,220 @@ fn account_data_managers_fall_back_to_the_widget_url() {
             ("https://b/ui", "https://b/ui")
         ]
     );
+}
+
+#[test]
+fn integration_manager_page_preserves_ui_url_path() {
+    let room = room_id!("!room:example.org");
+    assert_eq!(
+        integration_manager_page("https://scalar.vector.im", Some("tok"), room).as_deref(),
+        Some("https://scalar.vector.im/?scalar_token=tok&room_id=%21room%3Aexample.org")
+    );
+    assert_eq!(
+        integration_manager_page("https://dimension.example.org/element", Some("tok"), room)
+            .as_deref(),
+        Some(
+            "https://dimension.example.org/element?scalar_token=tok&room_id=%21room%3Aexample.org"
+        )
+    );
+}
+
+#[test]
+fn terms_urls_cover_scalar_origin_and_subpath_layouts_without_duplicates() {
+    assert_eq!(
+        terms_urls("https://scalar.vector.im/api"),
+        [
+            "https://scalar.vector.im/api/terms",
+            "https://scalar.vector.im/_matrix/integrations/v1/terms",
+            "https://scalar.vector.im/api/_matrix/integrations/v1/terms",
+        ]
+    );
+    assert_eq!(
+        terms_urls("https://scalar.vector.im"),
+        [
+            "https://scalar.vector.im/terms",
+            "https://scalar.vector.im/_matrix/integrations/v1/terms",
+        ]
+    );
+    assert_eq!(
+        terms_urls("https://im.example.org/_matrix/integrations/v1"),
+        [
+            "https://im.example.org/_matrix/integrations/v1/terms",
+            "https://im.example.org/_matrix/integrations/v1/_matrix/integrations/v1/terms",
+        ]
+    );
+}
+
+#[test]
+fn well_known_bases_deduplicate_matching_origins_and_include_delegated_server_name() {
+    let same = well_known_bases("https://example.org:8448", Some("example.org"));
+    assert_eq!(
+        same.iter().map(url::Url::as_str).collect::<Vec<_>>(),
+        ["https://example.org:8448/", "https://example.org/"]
+    );
+    let exact_same = well_known_bases("https://example.org", Some("example.org"));
+    assert_eq!(
+        exact_same.iter().map(url::Url::as_str).collect::<Vec<_>>(),
+        ["https://example.org/"]
+    );
+    let delegated = well_known_bases("https://matrix.example.org", Some("example.org"));
+    assert_eq!(
+        delegated.iter().map(url::Url::as_str).collect::<Vec<_>>(),
+        ["https://matrix.example.org/", "https://example.org/"]
+    );
+}
+
+#[tokio::test]
+async fn scalar_api_terms_endpoint_is_used_first_for_pending_and_accept() {
+    let server = MatrixMockServer::new().await;
+    let client = server.client_builder().build().await;
+    let uri = server.server().uri();
+    Mock::given(method("GET"))
+        .and(path("/.well-known/matrix/client"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "m.integrations": {"managers": [
+                {"api_url": format!("{uri}/scalar/api"), "ui_url": format!("{uri}/scalar")}
+            ]}
+        })))
+        .mount(server.server())
+        .await;
+    Mock::given(method("GET"))
+        .and(path_regex(
+            "/_matrix/client/v3/user/.*/account_data/m.(widgets|accepted_terms)",
+        ))
+        .respond_with(
+            ResponseTemplate::new(404)
+                .set_body_json(json!({"errcode": "M_NOT_FOUND", "error": "Not found"})),
+        )
+        .mount(server.server())
+        .await;
+    Mock::given(method("POST"))
+        .and(path_regex(
+            "/_matrix/client/v3/user/.*/openid/request_token",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "access_token": "openid", "token_type": "Bearer",
+            "matrix_server_name": "example.org", "expires_in": 3600
+        })))
+        .mount(server.server())
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/scalar/api/register"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"scalar_token": "s3"})))
+        .expect(1)
+        .mount(server.server())
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/scalar/api/terms"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"policies": {
+            "privacy": {"version": "1", "en": {"name": "Privacy", "url": "https://im/privacy"}}
+        }})))
+        .expect(1)
+        .mount(server.server())
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/scalar/api/terms"))
+        .and(header("Authorization", "Bearer s3"))
+        .and(body_json(json!({"user_accepts": ["https://im/privacy"]})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .expect(1)
+        .mount(server.server())
+        .await;
+    Mock::given(method("PUT"))
+        .and(path_regex(
+            "/_matrix/client/v3/user/.*/account_data/m.accepted_terms",
+        ))
+        .and(body_json(json!({"accepted": ["https://im/privacy"]})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .expect(1)
+        .mount(server.server())
+        .await;
+    let core = core_with(&server, client).await;
+    let session = core.signed_in().unwrap();
+
+    let pending = session.integration_manager_terms().await.unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].url, "https://im/privacy");
+
+    session
+        .accept_integration_manager_terms(vec!["https://im/privacy".to_owned()])
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn origin_root_msc1961_terms_endpoint_works_when_api_terms_404s() {
+    let server = MatrixMockServer::new().await;
+    let client = server.client_builder().build().await;
+    let uri = server.server().uri();
+    Mock::given(method("GET"))
+        .and(path("/.well-known/matrix/client"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "m.integrations": {"managers": [
+                {"api_url": format!("{uri}/scalar/api"), "ui_url": format!("{uri}/scalar")}
+            ]}
+        })))
+        .mount(server.server())
+        .await;
+    Mock::given(method("GET"))
+        .and(path_regex(
+            "/_matrix/client/v3/user/.*/account_data/m.(widgets|accepted_terms)",
+        ))
+        .respond_with(
+            ResponseTemplate::new(404)
+                .set_body_json(json!({"errcode": "M_NOT_FOUND", "error": "Not found"})),
+        )
+        .mount(server.server())
+        .await;
+    Mock::given(method("POST"))
+        .and(path_regex(
+            "/_matrix/client/v3/user/.*/openid/request_token",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "access_token": "openid", "token_type": "Bearer",
+            "matrix_server_name": "example.org", "expires_in": 3600
+        })))
+        .mount(server.server())
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/scalar/api/register"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"scalar_token": "s3"})))
+        .expect(1)
+        .mount(server.server())
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/_matrix/integrations/v1/terms"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"policies": {
+            "tos": {"version": "1", "en": {"name": "Terms", "url": "https://im/tos"}}
+        }})))
+        .expect(1)
+        .mount(server.server())
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/_matrix/integrations/v1/terms"))
+        .and(header("Authorization", "Bearer s3"))
+        .and(body_json(json!({"user_accepts": ["https://im/tos"]})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .expect(1)
+        .mount(server.server())
+        .await;
+    Mock::given(method("PUT"))
+        .and(path_regex(
+            "/_matrix/client/v3/user/.*/account_data/m.accepted_terms",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .expect(1)
+        .mount(server.server())
+        .await;
+    let core = core_with(&server, client).await;
+    let session = core.signed_in().unwrap();
+
+    let pending = session.integration_manager_terms().await.unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].url, "https://im/tos");
+
+    session
+        .accept_integration_manager_terms(vec!["https://im/tos".to_owned()])
+        .await
+        .unwrap();
 }

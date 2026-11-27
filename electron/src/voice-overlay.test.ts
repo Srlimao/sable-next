@@ -16,6 +16,7 @@ function createFakeWindow() {
   const setAlwaysOnTop = vi.fn();
   const setIgnoreMouseEvents = vi.fn();
   const setFocusable = vi.fn();
+  const moveTop = vi.fn();
   const show = vi.fn(() => {
     visible = true;
   });
@@ -39,7 +40,7 @@ function createFakeWindow() {
     setIgnoreMouseEvents,
     setFocusable,
     setSkipTaskbar: vi.fn(),
-    moveTop: vi.fn(),
+    moveTop,
     show,
     showInactive,
     hide,
@@ -55,11 +56,14 @@ function createFakeWindow() {
     win,
     send,
     setBounds,
+    setAlwaysOnTop,
     setIgnoreMouseEvents,
     setFocusable,
+    moveTop,
     showInactive,
     hide,
     focus,
+    destroy,
     triggerReady: () => readyListener?.(),
   };
 }
@@ -260,5 +264,87 @@ describe('VoiceOverlayManager', () => {
       unlocked: false,
       config: { preview: true },
     });
+  });
+
+  test('destroys the overlay window when leaving a call or disabling the overlay', () => {
+    const fake = createFakeWindow();
+    manager = new VoiceOverlayManager({
+      platform: 'win32',
+      selfPid: 111,
+      pollMs: 10_000,
+      loadNative: () => ({
+        getForegroundWindowInfo: () =>
+          JSON.stringify({
+            hwnd: '101',
+            exe: 'game.exe',
+            title: 'My Game',
+            pid: 999,
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+            minimized: false,
+          }),
+      }),
+      createWindow: () => fake.win,
+      screenApi: {
+        screenToDipRect: (_w, rect) => rect,
+        getPrimaryWorkArea: () => ({ x: 0, y: 0, width: 1920, height: 1080 }),
+      },
+      onAction: vi.fn(),
+    });
+
+    manager.updateState(baseState);
+    manager.updateConfig(baseConfig);
+    fake.triggerReady();
+    expect(fake.destroy).not.toHaveBeenCalled();
+
+    manager.updateState({ ...baseState, inCall: false });
+    expect(fake.destroy).toHaveBeenCalledOnce();
+  });
+
+  test('skips redundant IPC and Win32 calls on unchanged ticks', () => {
+    const fake = createFakeWindow();
+    manager = new VoiceOverlayManager({
+      platform: 'win32',
+      selfPid: 111,
+      pollMs: 10_000,
+      loadNative: () => ({
+        getForegroundWindowInfo: () =>
+          JSON.stringify({
+            hwnd: '101',
+            exe: 'game.exe',
+            title: 'My Game',
+            pid: 999,
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+            minimized: false,
+          }),
+      }),
+      createWindow: () => fake.win,
+      screenApi: {
+        screenToDipRect: (_w, rect) => rect,
+        getPrimaryWorkArea: () => ({ x: 0, y: 0, width: 1920, height: 1080 }),
+      },
+      onAction: vi.fn(),
+    });
+
+    manager.updateState(baseState);
+    manager.updateConfig(baseConfig);
+    fake.triggerReady();
+
+    const sendsAfterReady = fake.send.mock.calls.length;
+    const ignoreCallsAfterReady = fake.setIgnoreMouseEvents.mock.calls.length;
+    const moveTopAfterReady = fake.moveTop.mock.calls.length;
+
+    manager.tick();
+    manager.tick();
+    manager.tick();
+
+    expect(fake.send).toHaveBeenCalledTimes(sendsAfterReady);
+    expect(fake.setIgnoreMouseEvents).toHaveBeenCalledTimes(ignoreCallsAfterReady);
+    expect(fake.moveTop).toHaveBeenCalledTimes(moveTopAfterReady);
   });
 });

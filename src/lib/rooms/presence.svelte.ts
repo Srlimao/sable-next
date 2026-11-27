@@ -12,6 +12,7 @@ export interface PresenceEntry {
 }
 
 const FETCH_DELAY_MS = 50;
+const MAX_ENTRIES = 5000;
 
 export type LastSeenBucket =
   | { kind: 'now' }
@@ -40,6 +41,7 @@ export function lastSeenBucket(msAgo: number): LastSeenBucket {
 
 export class PresenceStore {
   readonly #entries = new SvelteMap<string, PresenceEntry>();
+  readonly #online = new SvelteMap<string, boolean>();
   /* Nothing renders from these, and a reactive set would re-run every mounted
      presence reader on any other user's first look. */
   /* eslint-disable svelte/prefer-svelte-reactivity */
@@ -55,6 +57,33 @@ export class PresenceStore {
     this.#core = core;
     this.#stopEvents = core.subscribeEvents((event) => {
       if (event.type !== 'presence') return;
+
+      const nextOnline = event.presence !== 'offline';
+      if (this.#online.get(event.user_id) !== nextOnline) {
+        if (!this.#online.has(event.user_id) && this.#online.size >= MAX_ENTRIES) {
+          const oldest = this.#online.keys().next().value;
+          if (oldest !== undefined) this.#online.delete(oldest);
+        }
+        this.#online.set(event.user_id, nextOnline);
+      }
+
+      const prev = this.#entries.get(event.user_id);
+      if (
+        prev &&
+        prev.presence === event.presence &&
+        prev.statusMessage === event.status_message &&
+        prev.lastActiveAgo === event.last_active_ago
+      ) {
+        return;
+      }
+
+      if (!prev && this.#entries.size >= MAX_ENTRIES) {
+        const oldest = this.#entries.keys().next().value;
+        if (oldest !== undefined) {
+          this.#entries.delete(oldest);
+          this.#online.delete(oldest);
+        }
+      }
 
       this.#entries.set(event.user_id, {
         presence: event.presence,
@@ -73,6 +102,7 @@ export class PresenceStore {
     this.#flush = null;
     this.#pending.clear();
     this.#requested.clear();
+    this.#online.clear();
     this.#entries.clear();
   }
 
@@ -88,9 +118,17 @@ export class PresenceStore {
     return this.#entries.get(userId) ?? null;
   }
 
+  isOnline(userId: string): boolean {
+    return this.#online.get(userId) ?? false;
+  }
+
   #request(userId: string): void {
     if (this.#core === null || this.#requested.has(userId)) return;
 
+    if (this.#requested.size >= MAX_ENTRIES) {
+      const oldest = this.#requested.values().next().value;
+      if (oldest !== undefined) this.#requested.delete(oldest);
+    }
     this.#requested.add(userId);
     this.#pending.add(userId);
     this.#flush ??= setTimeout(() => {

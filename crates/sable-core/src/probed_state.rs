@@ -173,6 +173,7 @@ impl SignedIn {
 
 const RECENT_STATE_MS: u64 = 30_000;
 const RECENT_MEMBERS_MS: u64 = 60_000;
+const MAX_RECENT_ROOMS: usize = 4;
 
 pub(crate) type RoomStateSnapshot = Arc<Vec<Raw<AnyStateEvent>>>;
 
@@ -213,9 +214,24 @@ impl SignedIn {
             .send(get_state_events::v3::Request::new(room_id.to_owned()))
             .await?;
         let snapshot = Arc::new(response.room_state);
-        self.recent_state()
+        let fetched_at = now_ms();
+        let mut recent = self.recent_state();
+        recent
             .rooms
-            .insert(room_id.to_owned(), (now_ms(), snapshot.clone()));
+            .retain(|_, (fetched, _)| fetched_at.saturating_sub(*fetched) < RECENT_STATE_MS);
+        if !recent.rooms.contains_key(room_id)
+            && recent.rooms.len() >= MAX_RECENT_ROOMS
+            && let Some(oldest) = recent
+                .rooms
+                .iter()
+                .min_by_key(|(_, (fetched, _))| *fetched)
+                .map(|(id, _)| id.clone())
+        {
+            recent.rooms.remove(&oldest);
+        }
+        recent
+            .rooms
+            .insert(room_id.to_owned(), (fetched_at, snapshot.clone()));
         Ok(snapshot)
     }
 

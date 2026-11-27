@@ -24,6 +24,15 @@ execFileSync(
   {
     cwd: root,
     stdio: 'inherit',
+    ...(release
+      ? {
+          env: {
+            ...process.env,
+            CARGO_PROFILE_RELEASE_CODEGEN_UNITS:
+              process.env.CARGO_PROFILE_RELEASE_CODEGEN_UNITS ?? '16',
+          },
+        }
+      : {}),
   }
 );
 

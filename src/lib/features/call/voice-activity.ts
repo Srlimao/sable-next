@@ -3,7 +3,7 @@ import { ignoreError } from './call-transport';
 export const SPEAKING_LEVEL = 0.08;
 export const SPEAKING_ATTACK_MS = 60;
 export const SPEAKING_RELEASE_MS = 300;
-const POLL_MS = 20;
+const POLL_MS = 60;
 
 export const levelOf = (samples: Float32Array): number => {
   let sum = 0;
@@ -63,6 +63,7 @@ export function createVoiceActivity(onChange: () => void): VoiceActivity {
   };
 
   const poll = (): void => {
+    if (typeof document !== 'undefined' && document.hidden) return;
     const now = performance.now();
     let changed = false;
     for (const watch of watched.values()) {
@@ -84,9 +85,13 @@ export function createVoiceActivity(onChange: () => void): VoiceActivity {
     if (!watch) return;
     watched.delete(identity);
     watch.node?.disconnect();
-    if (watched.size === 0 && timer) {
-      clearInterval(timer);
-      timer = undefined;
+    watch.analyser.disconnect();
+    if (watched.size === 0) {
+      if (timer) {
+        clearInterval(timer);
+        timer = undefined;
+      }
+      void context?.suspend().catch(ignoreError);
     }
   };
 
@@ -98,7 +103,7 @@ export function createVoiceActivity(onChange: () => void): VoiceActivity {
       context ??= new AudioContext();
       if (context.state === 'suspended') void context.resume().catch(ignoreError);
       const analyser = context.createAnalyser();
-      analyser.fftSize = 1024;
+      analyser.fftSize = 256;
       const watch: Watch = {
         source,
         analyser,

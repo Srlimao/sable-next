@@ -13,7 +13,6 @@
     direct: boolean;
     desktop: boolean;
     widgetCount: number;
-    canManageWidgets: boolean;
     threadsUnread?: number;
     threadsOnly?: boolean;
   }
@@ -24,7 +23,6 @@
     direct,
     desktop,
     widgetCount,
-    canManageWidgets,
     threadsUnread = 0,
     threadsOnly = false,
   }: Props = $props();
@@ -64,13 +62,13 @@
     </PanelHeaderButton>
   {/if}
 {/if}
-{#if !threadsOnly && (widgetCount > 0 || canManageWidgets)}
+{#if !threadsOnly}
   <PanelHeaderButton
     label={i18n.t('widgets.label')}
-    aria-pressed={panels.widgetsOpen}
+    aria-pressed={panels.widgetsOpen || panels.watchTogetherTheater}
     onclick={() => panels.toggleWidgets()}
   >
-    <GridFourIcon weight={panels.widgetsOpen ? 'fill' : 'regular'} />
+    <GridFourIcon weight={panels.widgetsOpen || panels.watchTogetherTheater ? 'fill' : 'regular'} />
     {#if widgetCount > 0}
       <span class="widgets-count" aria-hidden="true">{widgetCount}</span>
     {/if}

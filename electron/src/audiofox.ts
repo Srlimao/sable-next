@@ -6,6 +6,7 @@ import type { AudioRequest, AudioResponse } from './audiofox-protocol';
 
 const REQUEST_TIMEOUT = 5000;
 const STOP_TIMEOUT = 300;
+const IDLE_TIMEOUT = 15_000;
 interface Pending {
   resolve: (value: string[] | undefined) => void;
   reject: (error: Error) => void;
@@ -16,6 +17,7 @@ interface Host {
   ready: boolean;
   pending: Map<number, Pending>;
   frames?: (data: Buffer) => void;
+  idleTimer?: ReturnType<typeof setTimeout>;
 }
 let host: Host | undefined;
 let sequence = 0;
@@ -36,9 +38,28 @@ function rejectPending(current: Host, error: Error): void {
   current.pending.clear();
 }
 
+function clearIdleTimer(current: Host): void {
+  if (!current.idleTimer) return;
+  clearTimeout(current.idleTimer);
+  current.idleTimer = undefined;
+}
+
+function scheduleIdleStop(current: Host): void {
+  clearIdleTimer(current);
+  if (host !== current || current.frames || current.pending.size > 0) return;
+  current.idleTimer = setTimeout(() => {
+    current.idleTimer = undefined;
+    if (host === current && !current.frames && current.pending.size === 0) {
+      stop();
+    }
+  }, IDLE_TIMEOUT);
+  current.idleTimer.unref();
+}
+
 function terminate(current: Host, error: Error): void {
   if (host !== current) return;
   host = undefined;
+  clearIdleTimer(current);
   rejectPending(current, error);
   current.child.kill();
   current.frames?.(Buffer.alloc(0));
@@ -48,7 +69,7 @@ function worker(): Host {
   if (host) return host;
   const child = utilityProcess.fork(join(__dirname, 'audiofox-host.cjs'), [], {
     serviceName: 'Sable Audio',
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['ignore', 'ignore', 'pipe'],
   });
   const current: Host = { child, ready: false, pending: new Map() };
   host = current;
@@ -77,6 +98,7 @@ function worker(): Host {
 }
 
 function request(current: Host, command: AudioRequest): Promise<string[] | undefined> {
+  clearIdleTimer(current);
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       terminate(current, new Error('Audio capture timed out'));
@@ -96,11 +118,16 @@ function request(current: Host, command: AudioRequest): Promise<string[] | undef
 }
 
 export async function listApps(): Promise<ScreenAudioListing> {
-  const apps = await request(worker(), { command: 'list', id: ++sequence, rootPid: process.pid });
-  return {
-    status: 'available',
-    apps: (apps ?? []).map((id) => ({ id, label: id.slice('audiofox:'.length) })),
-  };
+  const current = worker();
+  try {
+    const apps = await request(current, { command: 'list', id: ++sequence, rootPid: process.pid });
+    return {
+      status: 'available',
+      apps: (apps ?? []).map((id) => ({ id, label: id.slice('audiofox:'.length) })),
+    };
+  } finally {
+    scheduleIdleStop(current);
+  }
 }
 
 export function sourceName(id: string): string | undefined {
@@ -110,6 +137,7 @@ export function sourceName(id: string): string | undefined {
 export async function start(include: string[], frames: (data: Buffer) => void): Promise<void> {
   stop();
   const current = worker();
+  clearIdleTimer(current);
   current.frames = frames;
   try {
     await request(current, { command: 'start', id: ++sequence, rootPid: process.pid, include });
@@ -123,6 +151,7 @@ export function stop(): void {
   const current = host;
   if (!current) return;
   host = undefined;
+  clearIdleTimer(current);
   rejectPending(current, new Error('Audio capture stopped'));
   const timer = setTimeout(() => {
     current.child.kill();

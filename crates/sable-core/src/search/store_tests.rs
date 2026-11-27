@@ -576,7 +576,7 @@ fn assert_stats_are_filled(index: &MessageIndex) {
         stats.memory_used > 0,
         "the page cache holds the pages just written"
     );
-    assert_eq!(stats.memory_budget, 64 * 1024 * 1024);
+    assert_eq!(stats.memory_budget, 16 * 1024 * 1024);
     assert!(stats.disk > 0);
     assert!(stats.disk_index > 0, "the full-text index takes pages");
     assert!(stats.disk_bookkeeping > 0);

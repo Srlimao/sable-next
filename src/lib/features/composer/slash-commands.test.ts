@@ -1143,3 +1143,22 @@ test('/delete reports a wildcard matching nobody as an error', async () => {
   });
   expect(commands.bulkRedact).not.toHaveBeenCalled();
 });
+
+test('/watch opens Watch Together with or without a valid YouTube URL', async () => {
+  expect(slashCommandNames()).toContain('watch');
+  expect(parseSlash('/watch', null, 'matrix.to')).toMatchObject({ kind: 'command', name: 'watch' });
+
+  await expect(runSlash('/watch', context(fakeCommands()))).resolves.toEqual({
+    kind: 'watchTogether',
+    url: null,
+  });
+  await expect(
+    runSlash('/watch https://youtu.be/dQw4w9WgXcQ', context(fakeCommands()))
+  ).resolves.toEqual({
+    kind: 'watchTogether',
+    url: 'https://youtu.be/dQw4w9WgXcQ',
+  });
+  await expect(runSlash('/watch https://example.org/not-youtube', context(fakeCommands()))).rejects.toMatchObject({
+    key: 'composer.slash.watch.usage',
+  });
+});

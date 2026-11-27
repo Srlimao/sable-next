@@ -128,6 +128,17 @@ fn init(filter: &str) {
     use tracing_subscriber::prelude::*;
 
     INIT.call_once(|| {
+        let worker_threads =
+            std::thread::available_parallelism().map_or(2, |count| count.get().clamp(2, 4));
+        if let Ok(runtime) = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(worker_threads)
+            .max_blocking_threads(16)
+            .enable_all()
+            .build()
+        {
+            napi::bindgen_prelude::create_custom_tokio_runtime(runtime);
+        }
+
         let previous = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
             previous(info);

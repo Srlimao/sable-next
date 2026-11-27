@@ -323,14 +323,27 @@ impl Store {
         room_id: &RoomId,
         event_ids: &[String],
     ) -> Result<HashSet<OwnedEventId>> {
+        if event_ids.is_empty() {
+            return Ok(HashSet::new());
+        }
         let statements = event_ids
-            .iter()
-            .map(|event_id| {
-                statement!(
-                    "SELECT event_id FROM classified WHERE room_id = ?1 AND event_id = ?2",
-                    room_id.as_str(),
-                    event_id.as_str()
-                )
+            .chunks(200)
+            .map(|chunk| {
+                let placeholders = (2..=chunk.len() + 1)
+                    .map(|index| format!("?{index}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let mut params = Vec::with_capacity(chunk.len() + 1);
+                params.push(Value::Text(room_id.as_str().to_owned()));
+                for event_id in chunk {
+                    params.push(Value::Text(event_id.clone()));
+                }
+                Statement {
+                    sql: format!(
+                        "SELECT event_id FROM classified WHERE room_id = ?1 AND event_id IN ({placeholders})"
+                    ),
+                    params,
+                }
             })
             .collect();
         Ok(self

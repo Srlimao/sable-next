@@ -1,7 +1,12 @@
 import { expect, test } from 'vitest';
 
 import type { RoomWidget } from './widget-content.js';
-import { templateWidgetUrl, WIDGET_CLIENT_ID } from './widget-url.js';
+import {
+  attachScalarToken,
+  needsScalarToken,
+  templateWidgetUrl,
+  WIDGET_CLIENT_ID,
+} from './widget-url.js';
 
 const vars = {
   userId: '@kris:example.org',
@@ -106,4 +111,49 @@ test('percent-encodes a value that would otherwise break out of the query string
 test('returns the templated string unchanged if the result is not a valid url', () => {
   const url = templateWidgetUrl(widget('not a url $matrix_user_id'), vars);
   expect(url).toBe(`not a url ${encodeURIComponent(vars.userId)}`);
+});
+
+test('detects widget urls that need a scalar token', () => {
+  expect(
+    needsScalarToken('https://scalar.vector.im/api/widgets/youtube.html?url=https%3A%2F%2Fyoutu.be%2Fabc')
+  ).toBe(true);
+  expect(
+    needsScalarToken('https://integrations.element.io/api/widgets/youtube.html?widgetId=w1')
+  ).toBe(true);
+  expect(needsScalarToken('https://custom.example.org/api/widgets/etherpad.html')).toBe(true);
+  expect(
+    needsScalarToken('https://scalar.vector.im/api/widgets/youtube.html?scalar_token=already')
+  ).toBe(false);
+  expect(needsScalarToken('https://widget.example/app?user=$matrix_user_id')).toBe(false);
+  expect(needsScalarToken('not a url')).toBe(false);
+});
+
+test('attaches scalar_token only to matching or Element Scalar alias origins', () => {
+  const manager = 'https://scalar.vector.im/?scalar_token=s3&room_id=%21r%3Aexample.org';
+  const sameOrigin = attachScalarToken(
+    'https://scalar.vector.im/api/widgets/youtube.html?widgetId=w1',
+    manager
+  );
+  expect(new URL(sameOrigin).searchParams.get('scalar_token')).toBe('s3');
+
+  const alias = attachScalarToken(
+    'https://integrations.element.io/api/widgets/youtube.html?widgetId=w1',
+    manager
+  );
+  expect(new URL(alias).searchParams.get('scalar_token')).toBe('s3');
+
+  const unrelated = 'https://evil.example.org/api/widgets/youtube.html?widgetId=w1';
+  expect(attachScalarToken(unrelated, manager)).toBe(unrelated);
+
+  const elementWidget = 'https://integrations.element.io/api/widgets/youtube.html?widgetId=w1';
+  expect(
+    attachScalarToken(
+      elementWidget,
+      'https://custom.example.org/?scalar_token=secret&room_id=%21r%3Aexample.org'
+    )
+  ).toBe(elementWidget);
+
+  expect(attachScalarToken(elementWidget, 'https://scalar.vector.im/?room_id=%21r')).toBe(
+    elementWidget
+  );
 });

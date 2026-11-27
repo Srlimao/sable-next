@@ -510,9 +510,13 @@
     const frame = await playback.frame(index);
     if (!frame) return;
     if (gifPreview) {
-      gifPreview.width = frame.image.displayWidth;
-      gifPreview.height = frame.image.displayHeight;
-      gifPreview.getContext('2d')?.drawImage(frame.image, 0, 0);
+      const nextWidth = frame.image.displayWidth;
+      const nextHeight = frame.image.displayHeight;
+      if (gifPreview.width !== nextWidth) gifPreview.width = nextWidth;
+      if (gifPreview.height !== nextHeight) gifPreview.height = nextHeight;
+      const context = gifPreview.getContext('2d');
+      context?.clearRect(0, 0, nextWidth, nextHeight);
+      context?.drawImage(frame.image, 0, 0);
     }
     frame.release();
     paintedCanvas = gifPreview;

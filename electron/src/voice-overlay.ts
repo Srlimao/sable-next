@@ -105,7 +105,6 @@ function defaultOverlayWindow(): OverlayWindowLike {
       preload: join(__dirname, 'overlay-preload.cjs'),
       sandbox: true,
       contextIsolation: true,
-      backgroundThrottling: false,
     },
   });
   if (process.platform !== 'win32') {
@@ -138,6 +137,9 @@ export class VoiceOverlayManager {
   #targetHwnd: string | null = null;
   #widgetSize = { width: 220, height: 80 };
   #lastBoundsKey = '';
+  #lastWindowMode: 'locked' | 'unlocked' | null = null;
+  #lastTopKey = '';
+  #lastRenderKey = '';
 
   constructor(deps: VoiceOverlayDeps) {
     this.#platform = deps.platform ?? process.platform;
@@ -206,15 +208,20 @@ export class VoiceOverlayManager {
     if (!this.#targetRect) return;
     this.#unlocked = true;
     const window = this.#ensureWindow();
-    window.setIgnoreMouseEvents(false);
-    window.setFocusable(true);
-    window.setSkipTaskbar(true);
+    const wasVisible = window.isVisible();
+    if (this.#lastWindowMode !== 'unlocked' || !wasVisible) {
+      window.setIgnoreMouseEvents(false);
+      window.setFocusable(true);
+      window.setSkipTaskbar(true);
+      this.#lastWindowMode = 'unlocked';
+    }
     this.#applyBounds(this.#targetRect);
     if (this.#ready) {
-      window.show();
+      if (!wasVisible) window.show();
       window.setAlwaysOnTop(true, 'screen-saver');
       window.moveTop();
       window.focus();
+      this.#lastTopKey = `unlocked:${this.#targetHwnd ?? 'preview'}`;
     }
     this.#pushRender();
   }
@@ -261,7 +268,7 @@ export class VoiceOverlayManager {
       !this.#config.enabled ||
       (!this.#state.inCall && !this.#config.preview)
     ) {
-      this.#hide();
+      this.#destroyWindow();
       return;
     }
 
@@ -303,15 +310,7 @@ export class VoiceOverlayManager {
       clearInterval(this.#pollTimer);
       this.#pollTimer = undefined;
     }
-    this.#unlocked = false;
-    this.#targetRect = null;
-    this.#targetHwnd = null;
-    this.#lastBoundsKey = '';
-    if (this.#window && !this.#window.isDestroyed()) {
-      this.#window.destroy();
-    }
-    this.#window = null;
-    this.#ready = false;
+    this.#destroyWindow();
   }
 
   #shouldShowLockedContent(): boolean {
@@ -328,11 +327,14 @@ export class VoiceOverlayManager {
       if (this.#window && !this.#window.isDestroyed() && this.#window.isVisible()) {
         this.#window.hide();
       }
-      this.#pushRender();
+      this.#lastTopKey = '';
+      this.#lastWindowMode = null;
       return;
     }
 
     const window = this.#ensureWindow();
+    const mode: 'locked' | 'unlocked' = this.#unlocked ? 'unlocked' : 'locked';
+    const wasVisible = window.isVisible();
     const bounds = this.#unlocked
       ? this.#targetRect
       : computeLockedBounds(
@@ -343,20 +345,28 @@ export class VoiceOverlayManager {
           OVERLAY_MARGIN_PX
         );
     this.#applyBounds(bounds);
-    if (this.#unlocked) {
-      window.setIgnoreMouseEvents(false);
-      window.setFocusable(true);
+    if (this.#lastWindowMode !== mode || !wasVisible) {
+      if (this.#unlocked) {
+        window.setIgnoreMouseEvents(false);
+        window.setFocusable(true);
+      } else {
+        window.setIgnoreMouseEvents(true, { forward: false });
+        window.setFocusable(false);
+      }
       window.setSkipTaskbar(true);
-      if (this.#ready && !window.isVisible()) window.show();
-    } else {
-      window.setIgnoreMouseEvents(true, { forward: false });
-      window.setFocusable(false);
-      window.setSkipTaskbar(true);
-      if (this.#ready && !window.isVisible()) window.showInactive();
+      this.#lastWindowMode = mode;
     }
     if (this.#ready) {
-      window.setAlwaysOnTop(true, 'screen-saver');
-      window.moveTop();
+      if (!wasVisible) {
+        if (this.#unlocked) window.show();
+        else window.showInactive();
+      }
+      const topKey = `${mode}:${this.#targetHwnd ?? 'preview'}`;
+      if (!wasVisible || topKey !== this.#lastTopKey) {
+        window.setAlwaysOnTop(true, 'screen-saver');
+        window.moveTop();
+        this.#lastTopKey = topKey;
+      }
     }
     this.#pushRender();
   }
@@ -369,6 +379,7 @@ export class VoiceOverlayManager {
       this.#window.setIgnoreMouseEvents(true, { forward: false });
       this.#window.setFocusable(false);
       this.#window.setSkipTaskbar(true);
+      this.#lastWindowMode = 'locked';
       if (this.#targetRect && this.#shouldShowLockedContent()) {
         this.#applyBounds(
           computeLockedBounds(
@@ -383,9 +394,11 @@ export class VoiceOverlayManager {
           this.#window.showInactive();
           this.#window.setAlwaysOnTop(true, 'screen-saver');
           this.#window.moveTop();
+          this.#lastTopKey = `locked:${this.#targetHwnd ?? 'preview'}`;
         }
       } else {
         this.#window.hide();
+        this.#lastTopKey = '';
       }
     }
     this.#pushRender();
@@ -399,9 +412,26 @@ export class VoiceOverlayManager {
     this.#targetRect = null;
     this.#targetHwnd = null;
     this.#lastBoundsKey = '';
+    this.#lastTopKey = '';
+    this.#lastWindowMode = null;
     if (this.#window && !this.#window.isDestroyed() && this.#window.isVisible()) {
       this.#window.hide();
     }
+  }
+
+  #destroyWindow(): void {
+    this.#unlocked = false;
+    this.#targetRect = null;
+    this.#targetHwnd = null;
+    this.#lastBoundsKey = '';
+    this.#lastWindowMode = null;
+    this.#lastTopKey = '';
+    this.#lastRenderKey = '';
+    if (this.#window && !this.#window.isDestroyed()) {
+      this.#window.destroy();
+    }
+    this.#window = null;
+    this.#ready = false;
   }
 
   #applyBounds(bounds: OverlayRect): void {
@@ -415,8 +445,10 @@ export class VoiceOverlayManager {
   #onWindowReady(window: OverlayWindowLike): void {
     if (this.#window !== window || window.isDestroyed()) return;
     this.#ready = true;
-    this.#pushRender();
+    this.#lastRenderKey = '';
+    this.#pushRender(true);
     if (this.#targetRect && (this.#unlocked || this.#shouldShowLockedContent())) {
+      const mode: 'locked' | 'unlocked' = this.#unlocked ? 'unlocked' : 'locked';
       if (this.#unlocked) {
         window.show();
         window.setAlwaysOnTop(true, 'screen-saver');
@@ -427,6 +459,7 @@ export class VoiceOverlayManager {
         window.setAlwaysOnTop(true, 'screen-saver');
         window.moveTop();
       }
+      this.#lastTopKey = `${mode}:${this.#targetHwnd ?? 'preview'}`;
     }
   }
 
@@ -434,6 +467,9 @@ export class VoiceOverlayManager {
     if (this.#window && !this.#window.isDestroyed()) return this.#window;
     const window = this.#createWindow();
     this.#ready = false;
+    this.#lastWindowMode = null;
+    this.#lastTopKey = '';
+    this.#lastRenderKey = '';
     window.once('ready-to-show', () => {
       this.#onWindowReady(window);
     });
@@ -442,6 +478,9 @@ export class VoiceOverlayManager {
         this.#window = null;
         this.#ready = false;
         this.#unlocked = false;
+        this.#lastWindowMode = null;
+        this.#lastTopKey = '';
+        this.#lastRenderKey = '';
       }
     });
     void window.loadURL(OVERLAY_URL);
@@ -449,16 +488,20 @@ export class VoiceOverlayManager {
     return window;
   }
 
-  #pushRender(): void {
+  #pushRender(force = false): void {
     if (!this.#window || this.#window.isDestroyed() || !this.#ready) return;
-    this.#window.webContents.send('sable-overlay-update', {
+    const payload = {
       config: this.#config,
       state: this.#state,
       unlocked: this.#unlocked,
       targetWidth: this.#targetRect?.width ?? 1280,
       targetHeight: this.#targetRect?.height ?? 720,
       shortcutLabel: this.#shortcutLabel,
-    });
+    };
+    const renderKey = JSON.stringify(payload);
+    if (!force && renderKey === this.#lastRenderKey) return;
+    this.#lastRenderKey = renderKey;
+    this.#window.webContents.send('sable-overlay-update', payload);
   }
 
   #syncPolling(): void {
@@ -469,9 +512,14 @@ export class VoiceOverlayManager {
         this.tick();
       }, this.#pollMs);
       this.#pollTimer.unref();
-    } else if (!active && this.#pollTimer) {
-      clearInterval(this.#pollTimer);
-      this.#pollTimer = undefined;
+    } else if (!active) {
+      if (this.#pollTimer) {
+        clearInterval(this.#pollTimer);
+        this.#pollTimer = undefined;
+      }
+      if (this.#window) {
+        this.#destroyWindow();
+      }
     }
   }
 

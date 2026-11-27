@@ -23,6 +23,9 @@ export class RoomPanels {
   threadRootId = $state<string | null>(null);
   side = $state<SidePanel | null>(desktopMembersPreferred ? 'desktopMembers' : null);
   swapped = $state(false);
+  watchTogetherActive = $state(false);
+  watchTogetherTheater = $state(false);
+  pendingWatchUrl = $state<string | null>(null);
 
   #show(panel: SidePanel | null): void {
     this.swapped = this.side !== null && panel !== null && this.side !== panel;
@@ -92,12 +95,51 @@ export class RoomPanels {
   /** Called from a room-change effect, which must not come to depend on the open panel. */
   reset(): void {
     this.threadRootId = null;
-    const side = untrack(() => this.side);
-    if (side !== 'members' && side !== 'desktopMembers' && side !== 'widgets') {
-      untrack(() => {
+    untrack(() => {
+      this.watchTogetherActive = false;
+      this.watchTogetherTheater = false;
+      this.pendingWatchUrl = null;
+      const side = this.side;
+      if (side !== 'members' && side !== 'desktopMembers' && side !== 'widgets') {
         this.#show(null);
-      });
+      }
+    });
+  }
+
+  openWatchTogether(url: string | null = null): void {
+    if (url !== null) this.pendingWatchUrl = url;
+    this.watchTogetherActive = true;
+    if (!this.watchTogetherTheater) {
+      this.threadRootId = null;
+      this.#show('widgets');
     }
+  }
+
+  consumePendingWatchUrl(): void {
+    this.pendingWatchUrl = null;
+  }
+
+  clearWatchTogetherOpen(): void {
+    this.watchTogetherActive = false;
+  }
+
+  toggleWatchTogetherTheater(): void {
+    if (this.watchTogetherTheater) {
+      this.watchTogetherTheater = false;
+      this.watchTogetherActive = true;
+      this.threadRootId = null;
+      this.#show('widgets');
+    } else {
+      this.watchTogetherTheater = true;
+      this.watchTogetherActive = false;
+      if (this.side === 'widgets') this.#show(this.#home('widgets'));
+    }
+  }
+
+  closeWatchTogether(): void {
+    this.watchTogetherActive = false;
+    this.watchTogetherTheater = false;
+    this.pendingWatchUrl = null;
   }
 
   openThread(rootEventId: string): void {

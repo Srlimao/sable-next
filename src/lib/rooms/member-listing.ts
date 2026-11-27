@@ -89,10 +89,16 @@ export function groupMembers(
   alwaysListedFrom = DEFAULT_ALWAYS_LISTED_FROM
 ): MemberGroup[] {
   const ordered = [...members].sort(compare(sort));
-  const listed = (member: MemberView): boolean =>
-    member.power_level >= alwaysListedFrom || isOnline(member.user_id);
-  const offline = ordered.filter((member) => !listed(member));
-  const online = ordered.filter(listed).sort((left, right) => right.power_level - left.power_level);
+  const offline: MemberView[] = [];
+  const online: MemberView[] = [];
+  for (const member of ordered) {
+    if (member.power_level >= alwaysListedFrom || isOnline(member.user_id)) {
+      online.push(member);
+    } else {
+      offline.push(member);
+    }
+  }
+  online.sort((left, right) => right.power_level - left.power_level);
 
   const groups: MemberGroup[] = [];
   for (const member of online) {

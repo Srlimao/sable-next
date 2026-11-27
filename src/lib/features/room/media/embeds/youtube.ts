@@ -1,3 +1,5 @@
+import QuickLRU from 'quick-lru';
+
 import { embedService, embedServiceUrl } from '#lib/config/embed-service.js';
 import type {
   DearrowThumbnailFallback,
@@ -137,8 +139,8 @@ function dearrowThumbnailUrl(
   return thumbnailUrl(service, id, fallback, timestamp);
 }
 
-const youtubeDetails = new Map<string, Promise<YoutubeDetails | null>>();
-const dearrowDetails = new Map<string, Promise<DearrowDetails | null>>();
+const youtubeDetails = new QuickLRU<string, Promise<YoutubeDetails | null>>({ maxSize: 256 });
+const dearrowDetails = new QuickLRU<string, Promise<DearrowDetails | null>>({ maxSize: 256 });
 
 async function fetchDetails(service: string, id: string): Promise<YoutubeDetails | null> {
   const response = await fetch(embedServiceUrl(service, 'embed/youtube/details', { v: id }));

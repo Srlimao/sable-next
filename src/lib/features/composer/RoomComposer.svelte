@@ -217,6 +217,7 @@
     onEditLast?: (before?: string) => void;
     onEditNext?: (after: string) => void;
     onReplyStep?: (direction: ReplyDirection) => void;
+    onWatchTogether?: (url: string | null) => void;
     threadRoot?: string | null;
   }
 
@@ -251,6 +252,7 @@
     onEditLast,
     onEditNext,
     onReplyStep,
+    onWatchTogether,
     threadRoot = null,
   }: Props = $props();
 
@@ -296,7 +298,9 @@
   let recordingDraft: ProseMirrorNode | undefined;
   const voiceSupported = isVoiceRecordingSupported();
 
-  function isGifSearchAction(value: unknown): value is ConversationSendResult {
+  function isGifSearchAction(
+    value: unknown
+  ): value is Extract<ConversationSendResult, { kind: 'gifSearch' }> {
     return (
       typeof value === 'object' &&
       value !== null &&
@@ -304,6 +308,19 @@
       value.kind === 'gifSearch' &&
       'query' in value &&
       typeof value.query === 'string'
+    );
+  }
+
+  function isWatchTogetherAction(
+    value: unknown
+  ): value is Extract<ConversationSendResult, { kind: 'watchTogether' }> {
+    return (
+      typeof value === 'object' &&
+      value !== null &&
+      'kind' in value &&
+      value.kind === 'watchTogether' &&
+      'url' in value &&
+      (value.url === null || typeof value.url === 'string')
     );
   }
 
@@ -988,6 +1005,8 @@
           boardTab = 'gif';
           boardQuery = action.query;
           boardOpen = true;
+        } else if (isWatchTogetherAction(action)) {
+          onWatchTogether?.(action.url);
         }
       });
       editor.clearHistory();

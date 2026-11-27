@@ -16,7 +16,7 @@
   import SpeakerHighIcon from 'phosphor-svelte/lib/SpeakerHighIcon';
   import SpeakerLowIcon from 'phosphor-svelte/lib/SpeakerLowIcon';
   import SpeakerXIcon from 'phosphor-svelte/lib/SpeakerXIcon';
-  import { onDestroy, onMount } from 'svelte';
+  import { onDestroy } from 'svelte';
 
   import { nativeAudio, playsNatively } from '#lib/platform/native-audio.svelte.js';
   import IconButton from '#lib/ui/primitives/IconButton.svelte';
@@ -48,7 +48,7 @@
   let webPlaying = $state(false);
   let seekPosition = $state(0);
   let seekUserIsInteracting = $state(false);
-  let animationId: number | null;
+  let animationId: number | null = null;
 
   let { src, label, filename, attachedTop = false }: Props = $props();
 
@@ -58,12 +58,17 @@
   let isPlaying = $derived(native ? (nativeState?.playing ?? false) : webPlaying);
   let duration = $derived(native ? (nativeState?.duration ?? null) : webDuration);
 
-  const updateTime = () => {
-    if (!seekUserIsInteracting && native) {
+  const syncSeekPosition = () => {
+    if (seekUserIsInteracting) return;
+    if (native) {
       seekPosition = nativeState && !nativeState.ended ? nativeState.currentTime : 0;
-    } else if (!seekUserIsInteracting && player) {
-      seekPosition = player?.currentTime || 0;
+    } else if (player) {
+      seekPosition = player.currentTime || 0;
     }
+  };
+
+  const updateTime = () => {
+    syncSeekPosition();
     animationId = requestAnimationFrame(updateTime);
   };
 
@@ -71,14 +76,27 @@
     if (player) player.volume = voicePlayback.volume;
   });
 
-  onMount(() => {
+  $effect(() => {
+    if (!isPlaying) {
+      syncSeekPosition();
+      return;
+    }
     animationId = requestAnimationFrame(updateTime);
+    return () => {
+      if (animationId !== null) {
+        cancelAnimationFrame(animationId);
+        animationId = null;
+      }
+    };
   });
 
   onDestroy(() => {
     player?.pause();
     player = null;
-    if (animationId) cancelAnimationFrame(animationId);
+    if (animationId !== null) {
+      cancelAnimationFrame(animationId);
+      animationId = null;
+    }
   });
 </script>
 

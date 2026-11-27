@@ -1,3 +1,4 @@
+import QuickLRU from 'quick-lru';
 import { clamp } from '#lib/clamp.js';
 import {
   convertOklabToRgb,
@@ -22,7 +23,7 @@ const DARK_GROUND = '#2d2c36';
 const TEXT_RATIO = 4.5;
 const WEAK_TEXT_RATIO = 3;
 
-const adjusted = new Map<string, string>();
+const adjusted = new QuickLRU<string, string>({ maxSize: 512 });
 
 function colorRgb([r, g, b]: Rgb): ColorRgb {
   return { mode: 'rgb', r, g, b };

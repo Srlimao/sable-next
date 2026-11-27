@@ -1,3 +1,5 @@
+import QuickLRU from 'quick-lru';
+
 import { embedService, embedServiceUrl } from '#lib/config/embed-service.js';
 
 const HOSTS = new Set(['tiktok.com', 'www.tiktok.com', 'm.tiktok.com']);
@@ -54,7 +56,7 @@ export function isTiktokShortLink(href: string): boolean {
   return false;
 }
 
-const resolved = new Map<string, Promise<TiktokPost | null>>();
+const resolved = new QuickLRU<string, Promise<TiktokPost | null>>({ maxSize: 256 });
 
 async function fetchShortLink(href: string): Promise<TiktokPost | null> {
   const service = await embedService();

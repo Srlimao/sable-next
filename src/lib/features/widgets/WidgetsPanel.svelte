@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { MemberView } from '#src/generated/protocol';
   import { clamp } from '#lib/clamp.js';
   import { panelIn, panelOut, usePanelStage } from '#lib/ui/motion.js';
   import ArrowLeftIcon from 'phosphor-svelte/lib/ArrowLeftIcon';
@@ -12,6 +13,10 @@
   import ResizeHandle from '#lib/ui/primitives/ResizeHandle.svelte';
 
   import type { RoomWidget } from './widget-content.js';
+  import {
+    WATCH_TOGETHER_WIDGET_ID,
+    WATCH_TOGETHER_WIDGET_TYPE,
+  } from './watch-together/watch-together-protocol.js';
   import { widgetPermissionKey } from './capabilities.js';
   import { templateWidgetUrl } from './widget-url.js';
   import WidgetList from './WidgetList.svelte';
@@ -24,7 +29,14 @@
     displayName: string;
     avatarUrl: string;
     canManage?: boolean;
+    members?: readonly MemberView[];
     modal?: boolean;
+    openWatchTogether?: boolean;
+    pendingWatchUrl?: string | null;
+    onConsumePendingWatchUrl?: () => void;
+    onWatchTogetherOpened?: () => void;
+    onToggleTheater?: () => void;
+    onEnsureWatchWidget?: (fallbackUrl: string) => Promise<void>;
     onClose: () => void;
     onAdd?: (name: string, url: string) => Promise<void>;
     onRemove?: (widgetId: string) => void;
@@ -37,7 +49,14 @@
     displayName,
     avatarUrl,
     canManage = false,
+    members = [],
     modal = false,
+    openWatchTogether = false,
+    pendingWatchUrl = null,
+    onConsumePendingWatchUrl,
+    onWatchTogetherOpened,
+    onToggleTheater,
+    onEnsureWatchWidget,
     onClose,
     onAdd,
     onRemove,
@@ -61,7 +80,20 @@
     return pixels / Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
   }
 
-  let activeWidget = $derived(widgets.find((widget) => widget.id === activeId) ?? null);
+  let watchTogetherWidget = $derived<RoomWidget>(
+    widgets.find((widget) => widget.type === WATCH_TOGETHER_WIDGET_TYPE) ?? {
+      id: WATCH_TOGETHER_WIDGET_ID,
+      type: WATCH_TOGETHER_WIDGET_TYPE,
+      url: 'https://www.youtube.com',
+      name: i18n.t('widgets.watchTogether'),
+      data: {},
+    }
+  );
+  let activeWidget = $derived(
+    widgets.find((widget) => widget.id === activeId) ??
+      (activeId === watchTogetherWidget.id ? watchTogetherWidget : null)
+  );
+  let isWatchTogether = $derived(activeWidget?.type === WATCH_TOGETHER_WIDGET_TYPE);
   let activeUrl = $derived(
     activeWidget
       ? templateWidgetUrl(activeWidget, {
@@ -75,6 +107,12 @@
   let activeKey = $derived(
     activeWidget && activeUrl ? widgetPermissionKey(userId, roomId, activeWidget, activeUrl) : null
   );
+
+  $effect(() => {
+    if (!openWatchTogether) return;
+    activeId = watchTogetherWidget.id;
+    onWatchTogetherOpened?.();
+  });
 </script>
 
 {#snippet widgetBack()}
@@ -110,7 +148,7 @@
     prefix={activeWidget ? widgetBack : undefined}
   >
     {#snippet suffix()}
-      {#if activeKey}
+      {#if activeKey && !isWatchTogether}
         {@const key = activeKey}
         <PanelHeaderButton
           label={i18n.t('widgets.capabilitiesForget')}
@@ -129,8 +167,19 @@
   </PanelHeader>
 
   {#if activeWidget && activeUrl && activeKey}
-    {#key activeKey}
-      <WidgetView {roomId} widget={activeWidget} url={activeUrl} permissionKey={activeKey} />
+    {#key isWatchTogether ? activeWidget.id : activeKey}
+      <WidgetView
+        {roomId}
+        widget={activeWidget}
+        url={activeUrl}
+        permissionKey={activeKey}
+        {canManage}
+        {members}
+        {pendingWatchUrl}
+        {onConsumePendingWatchUrl}
+        {onToggleTheater}
+        {onEnsureWatchWidget}
+      />
     {/key}
   {:else}
     <WidgetList
@@ -138,6 +187,7 @@
       {widgets}
       {canManage}
       onOpen={(id) => (activeId = id)}
+      onOpenWatchTogether={() => (activeId = watchTogetherWidget.id)}
       {onAdd}
       {onRemove}
     />

@@ -29,6 +29,7 @@
     composer?: ConversationComposer;
     onReplyStep: (direction: ReplyDirection) => void;
     onJumpToContext: (eventId: string) => void;
+    onWatchTogether?: (url: string | null) => void;
   }
 
   let {
@@ -47,6 +48,7 @@
     composer = $bindable(),
     onReplyStep,
     onJumpToContext,
+    onWatchTogether,
   }: Props = $props();
 </script>
 
@@ -88,6 +90,7 @@
       onEditNext={conversation.editNext}
       {onReplyStep}
       {onJumpToContext}
+      {onWatchTogether}
     />
   {/if}
 {/if}

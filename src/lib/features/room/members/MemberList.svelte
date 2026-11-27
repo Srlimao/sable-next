@@ -58,8 +58,7 @@
 
   function connected(userId: string): boolean {
     if (!preferences.groupMembersByPresence) return true;
-    const entry = presenceStore.peek(userId);
-    return entry !== null && entry.presence !== 'offline';
+    return presenceStore.isOnline(userId);
   }
 
   let fetched = $state.raw<MemberView[]>([]);

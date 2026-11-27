@@ -16,6 +16,7 @@ import type {
   VoiceOverlayRunningApp,
   VoiceOverlayState,
 } from './voice-overlay-types';
+import type { YoutubeShortsSequenceResult } from './youtube-shorts-types';
 
 export interface ElectronSettings {
   hardwareAcceleration: boolean;
@@ -76,6 +77,10 @@ export interface ElectronBridge {
   pickFiles(request: PickFilesRequest): Promise<PickedFile[] | null>;
   pickThemeFiles(): Promise<ThemeFileSnapshot[]>;
   readThemeFile(path: string, since: number | null): Promise<ThemeFileSnapshot | null>;
+  fetchYoutubeShortsSequence?(
+    videoId: string,
+    continuation?: string | null
+  ): Promise<YoutubeShortsSequenceResult>;
   saveFile(request: SaveFileRequest): Promise<{ path: string } | null>;
   shareFile(request: PickedFile): Promise<void>;
   openAppLink(url: string): Promise<void>;

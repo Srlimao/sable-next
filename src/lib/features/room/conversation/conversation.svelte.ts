@@ -71,7 +71,9 @@ import { toasts } from '#lib/ui/toasts.svelte.js';
 const NO_MENTIONS: OutgoingMentions = { user_ids: [], room: false };
 const SEND_PREVIEW_WAIT_MS = 1_500;
 
-export type ConversationSendResult = { kind: 'gifSearch'; query: string };
+export type ConversationSendResult =
+  | { kind: 'gifSearch'; query: string }
+  | { kind: 'watchTogether'; url: string | null };
 
 export type ConversationDeps = {
   core: CoreClient;
@@ -288,7 +290,7 @@ export class Conversation {
       this.context = null;
       return;
     }
-    if (outcome.kind === 'gifSearch') {
+    if (outcome.kind === 'gifSearch' || outcome.kind === 'watchTogether') {
       this.context = null;
       return outcome;
     }

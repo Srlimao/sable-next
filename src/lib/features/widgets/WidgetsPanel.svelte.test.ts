@@ -26,8 +26,9 @@ vi.mock('matrix-widget-api', async (importOriginal) => {
   };
 });
 
-import { core } from '#lib/core/__mocks__/context.js';
+import { core, mockRpc } from '#lib/core/__mocks__/context.js';
 
+const defaultRpc = core.rpc;
 core.session = { account_id: 'a', user_id: '@kris:example.org', device_id: 'DEV' };
 
 import IntegrationManagerDialog from './IntegrationManagerDialog.svelte';
@@ -41,6 +42,7 @@ beforeEach(() => {
 afterEach(() => {
   localStorage.clear();
   drivers.length = 0;
+  core.rpc = defaultRpc;
   vi.restoreAllMocks();
 });
 
@@ -404,3 +406,86 @@ function latestDriver(): import('matrix-widget-api').WidgetDriver {
   if (!driver) throw new Error('no widget driver was created');
   return driver;
 }
+
+test('attaches scalar_token when opening a Scalar-hosted widget', async () => {
+  const integrationManagerTerms = vi.fn().mockResolvedValue([]);
+  const integrationManagerUrl = vi
+    .fn()
+    .mockResolvedValue('https://scalar.vector.im/?scalar_token=s3&room_id=%21room%3Aexample.org');
+  core.rpc = mockRpc({
+    session: {
+      integrationManagerTerms,
+      integrationManagerUrl,
+      knownRooms: vi.fn().mockResolvedValue([]),
+    },
+    widgets: { setWidgetFeed: vi.fn().mockResolvedValue(null) },
+  });
+  const youtubeWidget: RoomWidget = {
+    id: 'yt-1',
+    type: 'm.custom',
+    url: 'https://integrations.element.io/api/widgets/youtube.html?url=https%3A%2F%2Fyoutu.be%2FdQw4w9WgXcQ',
+    name: 'YouTube',
+    data: {},
+  };
+  const user = userEvent.setup();
+  renderWithTooltips(WidgetsPanel, {
+    ...commonProps,
+    widgets: [youtubeWidget],
+    onClose: vi.fn(),
+  });
+
+  await user.click(screen.getByRole('button', { name: 'YouTube' }));
+
+  const iframe = await screen.findByTitle<HTMLIFrameElement>('YouTube');
+  expect(integrationManagerTerms).toHaveBeenCalledOnce();
+  expect(integrationManagerUrl).toHaveBeenCalledWith({ room_id: '!room:example.org' });
+  expect(new URL(iframe.src).searchParams.get('scalar_token')).toBe('s3');
+});
+
+test('prompts for pending integration manager terms before loading a Scalar-hosted widget', async () => {
+  const integrationManagerTerms = vi
+    .fn()
+    .mockResolvedValue([{ url: 'https://scalar.vector.im/tos', name: 'Privacy Notice' }]);
+  const acceptIntegrationManagerTerms = vi.fn().mockResolvedValue(null);
+  const integrationManagerUrl = vi
+    .fn()
+    .mockResolvedValue('https://scalar.vector.im/?scalar_token=s3&room_id=%21room%3Aexample.org');
+  core.rpc = mockRpc({
+    session: {
+      integrationManagerTerms,
+      acceptIntegrationManagerTerms,
+      integrationManagerUrl,
+      knownRooms: vi.fn().mockResolvedValue([]),
+    },
+    widgets: { setWidgetFeed: vi.fn().mockResolvedValue(null) },
+  });
+  const youtubeWidget: RoomWidget = {
+    id: 'yt-2',
+    type: 'm.custom',
+    url: 'https://integrations.element.io/api/widgets/youtube.html?url=https%3A%2F%2Fyoutu.be%2FdQw4w9WgXcQ',
+    name: 'YouTube',
+    data: {},
+  };
+  const user = userEvent.setup();
+  renderWithTooltips(WidgetsPanel, {
+    ...commonProps,
+    widgets: [youtubeWidget],
+    onClose: vi.fn(),
+  });
+
+  await user.click(screen.getByRole('button', { name: 'YouTube' }));
+
+  expect(await screen.findByRole('link', { name: 'Privacy Notice' })).toHaveAttribute(
+    'href',
+    'https://scalar.vector.im/tos'
+  );
+  expect(integrationManagerUrl).not.toHaveBeenCalled();
+
+  await user.click(screen.getByRole('button', { name: 'Accept' }));
+
+  expect(acceptIntegrationManagerTerms).toHaveBeenCalledWith({
+    urls: ['https://scalar.vector.im/tos'],
+  });
+  const iframe = await screen.findByTitle<HTMLIFrameElement>('YouTube');
+  expect(new URL(iframe.src).searchParams.get('scalar_token')).toBe('s3');
+});

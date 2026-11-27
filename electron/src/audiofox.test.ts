@@ -55,6 +55,18 @@ test('lists sources asynchronously and passes the Electron parent PID', async ()
   });
 });
 
+test('stops the helper process after idle timeout following listApps', async () => {
+  const audio = await import('./audiofox');
+  const listing = audio.listApps();
+  await Promise.resolve();
+  children[0].reply(['audiofox:music']);
+  await listing;
+
+  expect(children[0].kill).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(15_500);
+  expect(children[0].kill).toHaveBeenCalledOnce();
+});
+
 test('kills a stalled listing and capture without blocking the main loop', async () => {
   const audio = await import('./audiofox');
   const listing = expect(audio.listApps()).rejects.toThrow('timed out');

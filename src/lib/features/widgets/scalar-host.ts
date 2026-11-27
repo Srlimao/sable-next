@@ -3,6 +3,7 @@ import { isRecord } from '#lib/guards.js';
 
 const WIDGET_STATE_TYPE = 'im.vector.modular.widgets';
 const READABLE_STATE_TYPES = new Set([
+  'm.room.create',
   'm.room.power_levels',
   'm.room.encryption',
   'm.room.member',
@@ -11,10 +12,20 @@ const READABLE_STATE_TYPES = new Set([
   WIDGET_STATE_TYPE,
   'io.element.integrations.installations',
 ]);
+const WRITABLE_STATE_TYPES = new Set([
+  'io.element.integrations.installations',
+  WIDGET_STATE_TYPE,
+  'm.widgets',
+]);
 
 type Rpc = Pick<CoreClient['rpc'], 'room_state'>;
 type Request = Record<string, unknown>;
-type StateEvent = { content?: Record<string, unknown> };
+type StateEvent = {
+  sender?: unknown;
+  type?: unknown;
+  state_key?: unknown;
+  content?: Record<string, unknown>;
+};
 
 export class ScalarError extends Error {}
 
@@ -46,6 +57,55 @@ function powerLevel(table: unknown, key: string, fallback: number): number {
   return typeof level === 'number' ? level : fallback;
 }
 
+function hasPrivilegedCreators(roomVersion: unknown): boolean {
+  if (roomVersion === 'org.matrix.hydra.11') return true;
+  return typeof roomVersion === 'string' && /^\d+$/.test(roomVersion) && Number(roomVersion) >= 12;
+}
+
+async function privilegedCreators(rpc: Rpc, roomId: string): Promise<string[]> {
+  const create = (await stateEvents(rpc, roomId, 'm.room.create', '')).at(0);
+  if (!create || !hasPrivilegedCreators(create.content?.room_version)) return [];
+  const creators = new Set<string>();
+  if (typeof create.sender === 'string' && create.sender !== '') creators.add(create.sender);
+  const additional = create.content?.additional_creators;
+  if (Array.isArray(additional)) {
+    for (const id of additional) {
+      if (typeof id === 'string' && id !== '') creators.add(id);
+    }
+  }
+  return [...creators];
+}
+
+function withPrivilegedCreators(
+  events: StateEvent[],
+  key: string | true,
+  creators: readonly string[]
+): StateEvent[] {
+  if (creators.length === 0) return events;
+  if (events.length === 0 && (key === '' || key === true)) {
+    return [
+      {
+        type: 'm.room.power_levels',
+        state_key: '',
+        content: {
+          users: Object.fromEntries(creators.map((id) => [id, Number.MAX_SAFE_INTEGER])),
+        },
+      },
+    ];
+  }
+  return events.map((event) => {
+    const content = isRecord(event.content) ? event.content : {};
+    const users = isRecord(content.users) ? { ...content.users } : {};
+    for (const creator of creators) {
+      if (typeof users[creator] !== 'number') users[creator] = Number.MAX_SAFE_INTEGER;
+    }
+    return {
+      ...event,
+      content: { ...content, users },
+    };
+  });
+}
+
 async function canSend(
   rpc: Rpc,
   roomId: string,
@@ -55,6 +115,7 @@ async function canSend(
 ): Promise<boolean> {
   const membership = await stateContent(rpc, roomId, 'm.room.member', userId);
   if (membership?.membership !== 'join') return false;
+  if ((await privilegedCreators(rpc, roomId)).includes(userId)) return true;
   const levels = await stateContent(rpc, roomId, 'm.room.power_levels', '');
   if (levels === null) return true;
   const own = powerLevel(levels.users, userId, powerLevel(levels, 'users_default', 0));
@@ -77,8 +138,30 @@ async function readEvents(rpc: Rpc, roomId: string, request: Request): Promise<u
   if (key !== true && typeof key !== 'string') {
     throw new ScalarError('Failed to read events');
   }
-  const events = await stateEvents(rpc, roomId, type, key === true ? null : key);
+  let events = await stateEvents(rpc, roomId, type, key === true ? null : key);
+  if (type === 'm.room.power_levels') {
+    events = withPrivilegedCreators(events, key, await privilegedCreators(rpc, roomId));
+  }
   return { events: events.slice(0, typeof limit === 'number' ? limit : undefined) };
+}
+
+async function sendStateEvent(rpc: Rpc, roomId: string, request: Request): Promise<unknown> {
+  const { type, state_key: key, content } = request;
+  if (
+    typeof type !== 'string' ||
+    !WRITABLE_STATE_TYPES.has(type) ||
+    typeof key !== 'string' ||
+    !isRecord(content)
+  ) {
+    throw new ScalarError('Failed to send event');
+  }
+  const eventId = await rpc.room_state.sendEvent({
+    room_id: roomId,
+    event_type: type,
+    state_key: key,
+    content,
+  });
+  return { event_id: eventId };
 }
 
 async function setWidget(
@@ -142,6 +225,8 @@ export async function answerScalarRequest(
       return setWidget(rpc, roomId, userId, request);
     case 'read_events':
       return readEvents(rpc, roomId, request);
+    case 'send_event':
+      return sendStateEvent(rpc, roomId, request);
     case 'get_room_enc_state':
       return (await stateEvents(rpc, roomId, 'm.room.encryption', '')).length > 0;
     case 'get_membership_count': {
