@@ -37,7 +37,8 @@
     "wasm:watch": "watchexec --restart --watch crates/sable-core --watch crates/sable-wasm --watch crates/sable-model --watch crates/sable-model-wasm --watch crates/sable-search -- pnpm wasm:dev",
     "android:build": "node scripts/build/android.mjs",
     "ios:frameworks": "node scripts/build/download-ios-frameworks.mjs",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "electron": "node -e \"const {spawnSync}=require('node:child_process'),{createRequire}=require('node:module'),{resolve}=require('node:path');const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;const bin=createRequire(resolve('electron/package.json'))('electron');process.exit(spawnSync(bin,['.',...process.argv.slice(1)],{cwd:'electron',stdio:'inherit',env}).status??1)\" --"
   },
   "dependencies": {
     "@arborium/arborium": "^2.18.2",
