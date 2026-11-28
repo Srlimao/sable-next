@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
+const appName = process.env.VITE_APP_NAME?.trim() || 'Dunhascord';
 const version =
   process.env.VERSION || JSON.parse(readFileSync(join(here, '../package.json'), 'utf8')).version;
 const builder = createRequire(import.meta.url).resolve('electron-builder/cli.js');
@@ -15,13 +16,19 @@ if (sandboxed && process.platform !== 'darwin') {
   throw new Error('The sandboxed build requires macOS.');
 }
 const stable = process.env.SABLE_BUILD_FLAVOR === 'stable';
+const productName = stable ? appName : `${appName} Nightly`;
 let config = stable ? 'electron-builder.stable.yml' : 'electron-builder.nightly.yml';
 let identifier = stable ? 'moe.sable.client' : 'moe.sable.next.nightly';
 if (sandboxed) {
   config = 'electron-builder.sandboxed.yml';
   identifier = 'moe.sable.client.sandboxed';
 }
-const env = { ...process.env, VITE_APP_VERSION: version, SABLE_IDENTIFIER: identifier };
+const env = {
+  ...process.env,
+  VITE_APP_NAME: appName,
+  VITE_APP_VERSION: version,
+  SABLE_IDENTIFIER: identifier,
+};
 
 execFileSync(process.execPath, [join(here, 'build.mjs'), '--release'], { stdio: 'inherit', env });
 execFileSync(
@@ -36,6 +43,7 @@ execFileSync(
     '--publish',
     'never',
     `-c.extraMetadata.version=${version}`,
+    `-c.productName=${productName}`,
     '--config',
     config,
     ...args.filter((arg) => arg !== '--sandboxed'),

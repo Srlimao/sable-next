@@ -38,6 +38,7 @@ import type {
 } from '../../src/lib/platform/file-dialog-types';
 
 import { deepLinksIn, deepLinkSchemes } from './deep-links';
+import { APP_NAME } from './app-name';
 import { AuthLoopback } from './auth-loopback';
 import { CallShortcuts, validBindings } from './call-shortcuts';
 import { VoiceOverlayManager } from './voice-overlay';
@@ -456,9 +457,9 @@ function startCore(): UtilityProcess {
       type: 'error',
       message: 'No system keyring',
       detail:
-        'Sable keeps your login and message keys in the system keyring, and none is available.\n\n' +
+        `${APP_NAME} keeps your login and message keys in the system keyring, and none is available.\n\n` +
         'On Linux, install and unlock a Secret Service provider such as GNOME Keyring or KWallet, ' +
-        'then start Sable again. Or keep the keys in files readable only by your user, and sign in again.\n\n' +
+        `then start ${APP_NAME} again. Or keep the keys in files readable only by your user, and sign in again.\n\n` +
         String(message.keyringUnavailable),
       buttons: ['Keep keys in files', 'Quit'],
       defaultId: 1,
@@ -1028,8 +1029,7 @@ async function chooseShareSource(): Promise<DesktopCapturerSource | undefined> {
       const { response } = await dialog.showMessageBox({
         type: 'warning',
         message: 'Screen recording access is required to share your screen.',
-        detail:
-          'Allow Sable in System Settings → Privacy & Security → Screen Recording, then restart Sable.',
+        detail: `Allow ${APP_NAME} in System Settings → Privacy & Security → Screen Recording, then restart ${APP_NAME}.`,
         buttons: ['Open System Settings', 'Cancel'],
         defaultId: 0,
         cancelId: 1,

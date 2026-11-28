@@ -1,6 +1,6 @@
 {
-  "name": "Sable",
-  "short_name": "Sable",
+  "name": "Dunhascord",
+  "short_name": "Dunhascord",
   "description": "An almost stable Matrix client",
   "id": "/",
   "start_url": "/",
@@ -12,12 +12,6 @@
   "theme_color": "#24232c",
   "icons": [
     {
-      "src": "/icons/logo.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
-      "purpose": "any"
-    },
-    {
       "src": "/icons/logo-192x192.png",
       "sizes": "192x192",
       "type": "image/png",
@@ -28,12 +22,6 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
-    },
-    {
-      "src": "/icons/logo-maskable.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
-      "purpose": "maskable"
     },
     {
       "src": "/icons/logo-maskable-192x192.png",

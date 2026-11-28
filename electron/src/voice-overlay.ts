@@ -7,6 +7,7 @@ import type {
   VoiceOverlayRunningApp,
   VoiceOverlayState,
 } from '../../src/lib/platform/voice-overlay-types';
+import { APP_NAME } from './app-name';
 import {
   OVERLAY_MARGIN_PX,
   computeLockedBounds,
@@ -88,7 +89,7 @@ const OVERLAY_URL = 'sable-app://app/__sable_overlay__/overlay.html';
 
 function defaultOverlayWindow(): OverlayWindowLike {
   const window = new BrowserWindow({
-    title: 'Sable Voice Overlay',
+    title: `${APP_NAME} Voice Overlay`,
     width: 240,
     height: 120,
     show: false,

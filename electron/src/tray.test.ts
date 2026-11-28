@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { BrowserWindow, MenuItemConstructorOptions, NativeImage } from 'electron';
 import { beforeEach, expect, test, vi } from 'vitest';
+import { APP_NAME } from './app-name';
 
 const mocks = vi.hoisted(() => ({
   quit: vi.fn(),
@@ -223,7 +224,7 @@ test('call state switches tray image and tooltip across connected, muted, deafen
   tray.update(true);
 
   tray.setCallState('connected', 'data:image/png;base64,connected');
-  expect(trayEvents[0].setToolTip).toHaveBeenLastCalledWith('Sable — Connected');
+  expect(trayEvents[0].setToolTip).toHaveBeenLastCalledWith(`${APP_NAME} — Connected`);
   expect(trayEvents[0].setImage).toHaveBeenLastCalledWith(
     mocks.createFromDataURL.mock.results[0].value
   );
@@ -232,19 +233,19 @@ test('call state switches tray image and tooltip across connected, muted, deafen
   expect(trayEvents[0].setImage).toHaveBeenCalledTimes(1);
 
   tray.setCallState('muted', 'data:image/png;base64,muted');
-  expect(trayEvents[0].setToolTip).toHaveBeenLastCalledWith('Sable — Muted');
+  expect(trayEvents[0].setToolTip).toHaveBeenLastCalledWith(`${APP_NAME} — Muted`);
   expect(trayEvents[0].setImage).toHaveBeenLastCalledWith(
     mocks.createFromDataURL.mock.results[1].value
   );
 
   tray.setCallState('deafened', 'data:image/png;base64,deafened');
-  expect(trayEvents[0].setToolTip).toHaveBeenLastCalledWith('Sable — Deafened');
+  expect(trayEvents[0].setToolTip).toHaveBeenLastCalledWith(`${APP_NAME} — Deafened`);
   expect(trayEvents[0].setImage).toHaveBeenLastCalledWith(
     mocks.createFromDataURL.mock.results[2].value
   );
 
   tray.setCallState('idle', null);
-  expect(trayEvents[0].setToolTip).toHaveBeenLastCalledWith('Sable');
+  expect(trayEvents[0].setToolTip).toHaveBeenLastCalledWith(APP_NAME);
   expect(trayEvents[0].setImage).toHaveBeenLastCalledWith(mocks.baseIcon);
 });
 
@@ -274,15 +275,15 @@ test('tray recreation preserves call state and empty data URLs fall back to base
   tray.setCallState('deafened', 'data:image/png;base64,deafened');
   tray.update(true);
   expect(trayEvents[0].image).toBe(mocks.createFromDataURL.mock.results[0].value);
-  expect(trayEvents[0].setToolTip).toHaveBeenLastCalledWith('Sable — Deafened');
+  expect(trayEvents[0].setToolTip).toHaveBeenLastCalledWith(`${APP_NAME} — Deafened`);
 
   tray.update(false);
   tray.update(true);
   expect(trayEvents[1].image).toBe(mocks.createFromDataURL.mock.results[0].value);
-  expect(trayEvents[1].setToolTip).toHaveBeenLastCalledWith('Sable — Deafened');
+  expect(trayEvents[1].setToolTip).toHaveBeenLastCalledWith(`${APP_NAME} — Deafened`);
 
   tray.setCallState('connected', 'invalid-url');
-  expect(trayEvents[1].setToolTip).toHaveBeenLastCalledWith('Sable — Connected');
+  expect(trayEvents[1].setToolTip).toHaveBeenLastCalledWith(`${APP_NAME} — Connected`);
   expect(trayEvents[1].setImage).toHaveBeenLastCalledWith(mocks.baseIcon);
 });
 
@@ -292,18 +293,18 @@ test('speaking state updates tooltip and caches decoded call icons across transi
 
   tray.setCallState('connected', 'data:image/png;base64,silent');
   expect(mocks.createFromDataURL).toHaveBeenCalledTimes(1);
-  expect(trayEvents[0].setToolTip).toHaveBeenLastCalledWith('Sable — Connected');
+  expect(trayEvents[0].setToolTip).toHaveBeenLastCalledWith(`${APP_NAME} — Connected`);
 
   tray.setCallState('speaking', 'data:image/png;base64,speaking');
   expect(mocks.createFromDataURL).toHaveBeenCalledTimes(2);
-  expect(trayEvents[0].setToolTip).toHaveBeenLastCalledWith('Sable — Speaking');
+  expect(trayEvents[0].setToolTip).toHaveBeenLastCalledWith(`${APP_NAME} — Speaking`);
   expect(trayEvents[0].setImage).toHaveBeenLastCalledWith(
     mocks.createFromDataURL.mock.results[1].value
   );
 
   tray.setCallState('connected', 'data:image/png;base64,silent');
   expect(mocks.createFromDataURL).toHaveBeenCalledTimes(2);
-  expect(trayEvents[0].setToolTip).toHaveBeenLastCalledWith('Sable — Connected');
+  expect(trayEvents[0].setToolTip).toHaveBeenLastCalledWith(`${APP_NAME} — Connected`);
   expect(trayEvents[0].setImage).toHaveBeenLastCalledWith(
     mocks.createFromDataURL.mock.results[0].value
   );

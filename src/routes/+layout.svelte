@@ -276,6 +276,7 @@
 
 <svelte:head>
   <link rel="icon" href={faviconUrl() ?? favicon} />
+  <meta name="apple-mobile-web-app-title" content={appName()} />
 </svelte:head>
 
 <!-- Icons ride along with a labelled control, so `role="img"` would only add a

@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { appName } from '#lib/deployment/brand.js';
+  import logo from '#lib/assets/brand-logo.png';
+  import { appName, logoUrl } from '#lib/deployment/brand.js';
   import { i18n } from '#lib/i18n.js';
   import {
     closeWindow,
@@ -41,6 +42,7 @@
 
 <div class={['titlebar', kind === 'mac' && 'titlebar-mac']} {@attach trackTitlebarHeight}>
   <div class="drag" data-tauri-drag-region>
+    <img class="icon" src={logoUrl() ?? logo} alt="" aria-hidden="true" draggable="false" />
     <span class="title">{appName()}</span>
   </div>
   {#if kind === 'desktop'}
@@ -106,8 +108,18 @@
     align-items: center;
     display: flex;
     flex: 1;
+    gap: var(--space-200);
     min-width: 0;
     padding-inline: var(--space-300);
+  }
+
+  .icon {
+    border-radius: 0.25rem;
+    flex: 0 0 auto;
+    height: 1rem;
+    object-fit: contain;
+    pointer-events: none;
+    width: 1rem;
   }
 
   .titlebar-mac .drag {

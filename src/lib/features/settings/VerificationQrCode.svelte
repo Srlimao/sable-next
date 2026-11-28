@@ -1,5 +1,5 @@
 <script lang="ts">
-  import logo from '#lib/assets/res/svg/logo.svg';
+  import logo from '#lib/assets/brand-logo.png';
 
   import type { QrCodeView } from '#src/generated/protocol';
 

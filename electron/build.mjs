@@ -7,6 +7,7 @@ import { browserCsp } from '../scripts/build/csp.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..');
+const appName = process.env.VITE_APP_NAME?.trim() || 'Dunhascord';
 const appVersion =
   process.env.VITE_APP_VERSION ||
   JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version;
@@ -83,6 +84,7 @@ await build({
   define: {
     __SABLE_CSP__: JSON.stringify(policy),
     __SABLE_IDENTIFIER__: JSON.stringify(process.env.SABLE_IDENTIFIER ?? 'moe.sable.next'),
+    __SABLE_APP_NAME__: JSON.stringify(appName),
     __SABLE_APP_VERSION__: JSON.stringify(appVersion),
     __SABLE_SENTRY__: JSON.stringify({
       dsn: process.env.VITE_SENTRY_DSN,
@@ -115,7 +117,7 @@ writeFileSync(
       http-equiv="Content-Security-Policy"
       content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src data:;"
     />
-    <title>Sable Voice Overlay</title>
+    <title>${appName} Voice Overlay</title>
     <style>
       html, body, #root {
         margin: 0;

@@ -3,7 +3,7 @@
 
   import type { RuntimeConfig } from '#lib/config/runtime-config.js';
   import { logoUrl } from '#lib/deployment/brand.js';
-  import logo from '#lib/assets/res/svg/logo.svg';
+  import logo from '#lib/assets/brand-logo.png';
 
   interface Props {
     class?: ClassValue;

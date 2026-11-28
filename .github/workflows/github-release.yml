@@ -18,6 +18,10 @@ on:
         options:
           - stable
           - nightly
+      app_name:
+        description: 'App display name (defaults to repo variable VITE_APP_NAME or Dunhascord)'
+        required: false
+        type: string
 
 permissions: {}
 
@@ -43,6 +47,7 @@ jobs:
       version: ${{ steps.meta.outputs.version }}
       tag: ${{ steps.meta.outputs.tag }}
       flavor: ${{ steps.meta.outputs.flavor }}
+      app_name: ${{ steps.meta.outputs.app_name }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -55,6 +60,8 @@ jobs:
         env:
           INPUT_TAG: ${{ inputs.tag }}
           INPUT_FLAVOR: ${{ inputs.flavor }}
+          INPUT_APP_NAME: ${{ inputs.app_name }}
+          VAR_APP_NAME: ${{ vars.VITE_APP_NAME }}
         run: |
           if [ -n "$INPUT_TAG" ]; then
             tag="$INPUT_TAG"
@@ -67,15 +74,18 @@ jobs:
             tag="v$version"
           fi
           flavor="${INPUT_FLAVOR:-stable}"
+          app_name="${INPUT_APP_NAME:-${VAR_APP_NAME:-Dunhascord}}"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "flavor=$flavor" >> "$GITHUB_OUTPUT"
+          echo "app_name=$app_name" >> "$GITHUB_OUTPUT"
 
       - name: Set up app and build
         uses: ./.github/actions/setup
         with:
           build: 'true'
         env:
+          VITE_APP_NAME: ${{ steps.meta.outputs.app_name }}
           VITE_APP_VERSION: ${{ steps.meta.outputs.version }}
           SABLE_BUILD_FLAVOR: ${{ steps.meta.outputs.flavor }}
 
@@ -100,6 +110,7 @@ jobs:
     env:
       VERSION: ${{ needs.build-web.outputs.version }}
       TAG: ${{ needs.build-web.outputs.tag }}
+      VITE_APP_NAME: ${{ needs.build-web.outputs.app_name }}
       VITE_APP_VERSION: ${{ needs.build-web.outputs.version }}
       SABLE_BUILD_FLAVOR: ${{ needs.build-web.outputs.flavor }}
     steps:
@@ -155,7 +166,7 @@ jobs:
             gh release create "$TAG" "${files[@]}" \
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
-              --title "Sable $VERSION ($FLAVOR)" \
+              --title "$VITE_APP_NAME $VERSION ($FLAVOR)" \
               --notes "Windows setup built from commit $GITHUB_SHA ($FLAVOR flavor)." \
               "${extra_args[@]}"
           fi

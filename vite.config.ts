@@ -4,11 +4,12 @@ import { sveltekit } from '@sveltejs/kit/vite';
 import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 import { defineConfig } from 'vite';
 import { isAbsolute, relative, resolve } from 'node:path';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 
 import { emojiDataPlugin } from './scripts/build/emoji-data-plugin.mjs';
 import { writeCspHeaders } from './scripts/build/csp.mjs';
 
+const appName = process.env.VITE_APP_NAME?.trim() || 'Dunhascord';
 const wasmOutput = process.env.SABLE_WASM_OUTPUT ?? 'src/generated/wasm';
 const serverMode = Boolean(process.env.VITE_SABLE_SERVER_URL);
 const nativeMobile =
@@ -109,6 +110,11 @@ export default defineConfig({
             app: { security: { csp: Record<string, string> } };
           };
           await writeCspHeaders('dist', config.app.security.csp);
+          const manifestPath = 'dist/manifest.webmanifest';
+          const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>;
+          manifest.name = appName;
+          manifest.short_name = appName;
+          writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
         },
       },
       inspector: true,

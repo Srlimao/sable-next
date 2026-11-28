@@ -5,6 +5,7 @@ import { type as osType } from '@tauri-apps/plugin-os';
 import { parseRuntimeConfig } from '#lib/config/runtime-config.js';
 
 import { appName, pageTitle } from './brand.js';
+import { DEFAULT_APP_NAME } from './default-app-name.js';
 import {
   communityFeatures,
   donateUrl,
@@ -34,11 +35,12 @@ const acme = parseRuntimeConfig({
   auth: { disableRegistration: true },
 });
 
-test('an unbranded deployment is Sable', () => {
-  expect(appName(sable)).toBe('Sable');
-  expect(pageTitle('Settings', sable)).toBe('Settings - Sable');
-  expect(pageTitle('', sable)).toBe('Sable');
-  expect(deviceDisplayName(sable)).toBe('Sable on Android');
+test('an unbranded deployment uses the default app name', () => {
+  expect(DEFAULT_APP_NAME).toBe('Dunhascord');
+  expect(appName(sable)).toBe(DEFAULT_APP_NAME);
+  expect(pageTitle('Settings', sable)).toBe(`Settings - ${DEFAULT_APP_NAME}`);
+  expect(pageTitle('', sable)).toBe(DEFAULT_APP_NAME);
+  expect(deviceDisplayName(sable)).toBe(`${DEFAULT_APP_NAME} on Android`);
   expect(privacyUrl(sable)).toBe(SABLE_PRIVACY_URL);
   expect(registrationEnabled(sable)).toBe(true);
 });
@@ -63,8 +65,8 @@ test('hiding community links keeps the deployment support room', () => {
 
 test('a nightly build says so in the device name', () => {
   build.nightly = true;
-  expect(deviceDisplayName(sable)).toBe('Sable (Nightly) on Android');
-  expect(oauthClientName(sable)).toBe('Sable (Nightly)');
+  expect(deviceDisplayName(sable)).toBe(`${DEFAULT_APP_NAME} (Nightly) on Android`);
+  expect(oauthClientName(sable)).toBe(`${DEFAULT_APP_NAME} (Nightly)`);
   build.nightly = false;
 });
 

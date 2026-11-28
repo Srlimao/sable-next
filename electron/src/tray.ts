@@ -1,14 +1,15 @@
 import { app, Menu, nativeImage, Tray, type BrowserWindow, type NativeImage } from 'electron';
 import { join } from 'node:path';
 import type { TrayCallStatus } from '../../src/lib/platform/tray-call-types';
+import { APP_NAME } from './app-name';
 import { writeMultiResIco } from './tray-ico';
 
 const TOOLTIPS: Record<TrayCallStatus, string> = {
-  idle: 'Sable',
-  connected: 'Sable — Connected',
-  speaking: 'Sable — Speaking',
-  muted: 'Sable — Muted',
-  deafened: 'Sable — Deafened',
+  idle: APP_NAME,
+  connected: `${APP_NAME} — Connected`,
+  speaking: `${APP_NAME} — Speaking`,
+  muted: `${APP_NAME} — Muted`,
+  deafened: `${APP_NAME} — Deafened`,
 };
 
 function withUnreadDot(base: NativeImage): NativeImage {
@@ -162,14 +163,14 @@ export class DesktopTray {
       this.tray.setContextMenu(
         Menu.buildFromTemplate([
           {
-            label: 'Show Sable',
+            label: `Show ${APP_NAME}`,
             click: () => {
               this.showWindow();
             },
           },
           { type: 'separator' },
           {
-            label: 'Quit Sable',
+            label: `Quit ${APP_NAME}`,
             click: () => {
               app.quit();
             },

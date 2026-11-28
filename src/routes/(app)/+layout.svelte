@@ -87,8 +87,8 @@
   import { type FaviconState, faviconState, setFavicon } from '#lib/ui/favicon.js';
   import { faviconUrl } from '#lib/deployment/brand.js';
   import idleFavicon from '#lib/assets/favicon.png';
-  import unreadFavicon from '#lib/assets/res/svg/unread.svg';
-  import highlightFavicon from '#lib/assets/res/svg/highlight.svg';
+  import unreadFavicon from '#lib/assets/favicon-unread.png';
+  import highlightFavicon from '#lib/assets/favicon-highlight.png';
   import { setKeepScreenOn, startSystemBarSync } from '#lib/platform/system-bars.js';
   import { installAndroidBack } from '#lib/platform/android-back.js';
   import {

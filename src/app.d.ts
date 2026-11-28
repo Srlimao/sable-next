@@ -33,6 +33,7 @@ declare global {
     /** Absent in self-hosted builds, which disables Sentry entirely. */
     readonly VITE_SENTRY_DSN?: string;
     readonly VITE_SENTRY_ENVIRONMENT?: string;
+    readonly VITE_APP_NAME?: string;
     readonly VITE_APP_VERSION?: string;
     readonly VITE_SABLE_SERVER_URL?: string;
     readonly VITE_SABLE_SERVER_VERSION?: string;

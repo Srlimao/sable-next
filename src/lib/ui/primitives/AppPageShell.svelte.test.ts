@@ -5,6 +5,7 @@ import { tick } from 'svelte';
 import { expect, test } from 'vitest';
 
 import { PageMeta } from '#lib/core/page-meta.js';
+import { DEFAULT_APP_NAME } from '#lib/deployment/default-app-name.js';
 import AppPageShell from './AppPageShell.svelte';
 import AppPageShellHarness from './AppPageShellHarness.test.svelte';
 
@@ -23,5 +24,5 @@ test('titles the document after the page', async () => {
   render(AppPageShell, { title: 'Developer' });
   await tick();
 
-  expect(document.title).toBe('Developer - Sable');
+  expect(document.title).toBe(`Developer - ${DEFAULT_APP_NAME}`);
 });
