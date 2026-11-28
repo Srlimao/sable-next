@@ -11,6 +11,7 @@ import { coreProxy } from './proxy';
 interface NativeCore {
   restore(): Promise<void>;
   setActive(active: boolean): Promise<void>;
+  endAllCalls(): Promise<void>;
   call(method: string, params: string): Promise<string>;
   fetchMedia(source: string, width: number, height: number, background: boolean): Promise<Buffer>;
   forgetMedia(source: string): Promise<void>;
@@ -127,6 +128,12 @@ function serve(directory: string): void {
   }
 
   process.parentPort.on('message', (event) => {
+    if (event.data === 'end-calls') {
+      void Promise.allSettled([instance.endAllCalls(), boundary.drainCallCleanups()]).then(() => {
+        process.parentPort.postMessage({ callsEnded: true });
+      });
+      return;
+    }
     if (event.ports.length !== 1) return;
     const [port] = event.ports;
     // A page that left debug logging sends no filter, and this process outlives its reload.

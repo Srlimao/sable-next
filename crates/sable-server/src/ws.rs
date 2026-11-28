@@ -1,5 +1,6 @@
 use std::{
-    sync::Arc,
+    collections::HashSet,
+    sync::{Arc, Mutex, PoisonError},
     time::{Duration, Instant},
 };
 
@@ -11,7 +12,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use futures_util::{SinkExt, StreamExt};
-use sable_core::protocol::{RpcCode, RpcError};
+use sable_core::protocol::{CallSessionId, RpcCode, RpcError};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, value::RawValue};
 use tokio::sync::{broadcast, mpsc};
@@ -22,8 +23,47 @@ use crate::{EventRecord, Server, SessionRevocation, UserRuntime, auth_routes::un
 const MAX_WEBSOCKET_MESSAGE_SIZE: usize = 1024 * 1024;
 const PING_TIMEOUT: Duration = Duration::from_secs(60);
 const PING_INTERVAL: Duration = Duration::from_secs(20);
+const DISCONNECT_HANGUP_TIMEOUT: Duration = Duration::from_secs(3);
 const OUTGOING_BUFFER: usize = 128;
 const RESET_FRAME: &str = r#"{"reset":true}"#;
+
+#[derive(Deserialize)]
+struct CallSessionPayload {
+    session: CallSessionId,
+}
+
+#[derive(Default)]
+struct ConnectionCalls {
+    sessions: Mutex<HashSet<CallSessionId>>,
+}
+
+impl ConnectionCalls {
+    fn record_join(&self, ok_json: &str) {
+        if let Ok(payload) = serde_json::from_str::<CallSessionPayload>(ok_json) {
+            self.sessions
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(payload.session);
+        }
+    }
+
+    fn record_leave(&self, params_json: &str) {
+        if let Ok(payload) = serde_json::from_str::<CallSessionPayload>(params_json) {
+            self.sessions
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .remove(&payload.session);
+        }
+    }
+
+    fn take_all(&self) -> Vec<CallSessionId> {
+        self.sessions
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .drain()
+            .collect()
+    }
+}
 
 #[derive(Deserialize)]
 struct Request {
@@ -195,6 +235,7 @@ impl Connection {
         ping.tick().await;
         let mut last_received = Instant::now();
         let mut tasks = tokio::task::JoinSet::new();
+        let call_sessions = Arc::new(ConnectionCalls::default());
         loop {
             tokio::select! {
                 () = self.server.shutdown.cancelled() => break,
@@ -207,7 +248,7 @@ impl Connection {
                     match message.opcode() {
                         yawc::OpCode::Text => {
                             last_received = Instant::now();
-                            if !self.on_text(message.payload(), outgoing, &mut tasks).await {
+                            if !self.on_text(message.payload(), outgoing, &mut tasks, &call_sessions).await {
                                 break;
                             }
                         }
@@ -230,6 +271,17 @@ impl Connection {
         }
         tasks.abort_all();
         while tasks.join_next().await.is_some() {}
+        let remaining = call_sessions.take_all();
+        if !remaining.is_empty() {
+            let core = self.runtime.core.clone();
+            let _ = tokio::time::timeout(DISCONNECT_HANGUP_TIMEOUT, async move {
+                for session in remaining {
+                    let params = format!(r#"{{"session":{}}}"#, session.0);
+                    let _ = core.call("calls.leave", &params).await;
+                }
+            })
+            .await;
+        }
     }
 
     /// False when the socket should close.
@@ -238,6 +290,7 @@ impl Connection {
         payload: &[u8],
         outgoing: &mpsc::Sender<yawc::Frame>,
         tasks: &mut tokio::task::JoinSet<()>,
+        call_sessions: &Arc<ConnectionCalls>,
     ) -> bool {
         if !self.session_valid().await {
             return false;
@@ -255,7 +308,7 @@ impl Connection {
             };
             return try_send_reply(outgoing, &reply);
         };
-        spawn_rpc(&self.server, &self.runtime, request, outgoing, tasks);
+        spawn_rpc(&self.server, &self.runtime, request, outgoing, tasks, call_sessions);
         true
     }
 
@@ -288,6 +341,7 @@ fn spawn_rpc(
     request: Request,
     outgoing: &mpsc::Sender<yawc::Frame>,
     tasks: &mut tokio::task::JoinSet<()>,
+    call_sessions: &Arc<ConnectionCalls>,
 ) {
     let Some(permit) = server.rpc_tasks.clone().try_acquire_owned().ok() else {
         reject_rate_limited(outgoing, request.id);
@@ -299,12 +353,21 @@ fn spawn_rpc(
     };
     let core = runtime.core.clone();
     let outgoing = outgoing.clone();
+    let call_sessions = Arc::clone(call_sessions);
     tasks.spawn(async move {
         let _permit = permit;
         let _user_permit = user_permit;
         let reply = if let Some(method) = request.method {
+            if method == "calls.leave" {
+                call_sessions.record_leave(request.params.get());
+            }
             match core.call(&method, request.params.get()).await {
-                Ok(ok) => Reply::Ok { id: request.id, ok },
+                Ok(ok) => {
+                    if method == "calls.join" {
+                        call_sessions.record_join(ok.get());
+                    }
+                    Reply::Ok { id: request.id, ok }
+                }
                 Err(error) => Reply::Error {
                     id: request.id,
                     error,
@@ -408,5 +471,18 @@ mod tests {
         let given: Request =
             serde_json::from_str(r#"{"id":1,"method":"m","params":{"a": 1}}"#).unwrap();
         assert_eq!(given.params.get(), r#"{"a": 1}"#);
+    }
+
+    #[test]
+    fn connection_calls_tracks_and_drains_remaining_sessions() {
+        let calls = ConnectionCalls::default();
+        calls.record_join(r#"{"session":10,"url":"wss://example"}"#);
+        calls.record_join(r#"{"session":20}"#);
+        calls.record_join("not json");
+        calls.record_leave(r#"{"session":10}"#);
+        calls.record_leave("invalid");
+
+        assert_eq!(calls.take_all(), vec![CallSessionId(20)]);
+        assert_eq!(calls.take_all(), Vec::<CallSessionId>::new());
     }
 }

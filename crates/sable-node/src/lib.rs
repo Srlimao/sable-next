@@ -262,6 +262,15 @@ impl SableCore {
     }
 
     #[napi]
+    pub fn end_all_calls<'env>(&self, env: &'env Env) -> napi::Result<PromiseRaw<'env, ()>> {
+        let core = self.core.clone();
+        env.spawn_future(async move {
+            core.end_all_calls().await;
+            Ok(())
+        })
+    }
+
+    #[napi]
     pub fn call<'env>(
         &self,
         env: &'env Env,

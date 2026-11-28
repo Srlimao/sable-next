@@ -1,7 +1,14 @@
 import { attachmentBytes } from '../transport/attachment-bytes';
 import { transportFailure } from '../transport';
 import { createRpc } from '#src/generated/protocol';
-import type { RpcError, RpcResult, CoreEvent, SubscriptionId, Rpc } from '#src/generated/protocol';
+import type {
+  CallSessionId,
+  CoreEvent,
+  Rpc,
+  RpcError,
+  RpcResult,
+  SubscriptionId,
+} from '#src/generated/protocol';
 import type { WasmDebugImage, WorkerMessage, WorkerRequest } from './protocol';
 import { TimelineEventRouter } from './timeline-event-router';
 import { readCoreLine } from '../lib/observability/wasm-log';
@@ -67,10 +74,30 @@ export function createCoreWorkerBoundary(
   let foreground: boolean | undefined;
   let foregroundTask = Promise.resolve();
   const timelineEvents = new TimelineEventRouter<WorkerPort>();
+  const callSessions = new Map<CallSessionId, WorkerPort>();
+  const pendingCallLeaves = new Set<Promise<void>>();
   let panic: string | null = null;
   let logs: string[] = [];
   let droppedLogs = 0;
   let flushLogsTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function trackCallLeave(task: Promise<unknown>): Promise<void> {
+    const tracked = task.then(
+      () => undefined,
+      () => undefined
+    );
+    pendingCallLeaves.add(tracked);
+    void tracked.finally(() => {
+      pendingCallLeaves.delete(tracked);
+    });
+    return tracked;
+  }
+
+  async function drainCallCleanups(): Promise<void> {
+    while (pendingCallLeaves.size > 0) {
+      await Promise.allSettled(pendingCallLeaves);
+    }
+  }
 
   // Hiding never stops sync: background tabs must keep notifying (#1142).
   function resumeSync(): void {
@@ -109,20 +136,44 @@ export function createCoreWorkerBoundary(
     port.onmessageerror = null;
     updateForeground();
     const subscriptions = timelineEvents.removeOwner(port);
-    if (subscriptions.length === 0) return;
-
-    void core.then(async (instance) => {
-      for (const subscription of subscriptions) {
-        try {
-          await createRpc(async (method, params) =>
-            instance.call(method, JSON.stringify(params))
-          ).timeline.unsubscribe({ subscription });
-        } catch (error) {
-          // The owner is gone, so cleanup errors cannot be reported to a page.
-          console.debug('[sable worker] closed port subscription not released', error);
-        }
+    const callsToLeave: CallSessionId[] = [];
+    for (const [session, owner] of callSessions) {
+      if (owner === port) {
+        callsToLeave.push(session);
+        callSessions.delete(session);
       }
-    });
+    }
+
+    if (subscriptions.length > 0) {
+      void core.then(async (instance) => {
+        for (const subscription of subscriptions) {
+          try {
+            await createRpc(async (method, params) =>
+              instance.call(method, JSON.stringify(params))
+            ).timeline.unsubscribe({ subscription });
+          } catch (error) {
+            // The owner is gone, so cleanup errors cannot be reported to a page.
+            console.debug('[sable worker] closed port subscription not released', error);
+          }
+        }
+      });
+    }
+
+    if (callsToLeave.length > 0) {
+      void trackCallLeave(
+        core.then(async (instance) => {
+          for (const session of callsToLeave) {
+            try {
+              await createRpc(async (method, params) =>
+                instance.call(method, JSON.stringify(params))
+              ).calls.leave({ session });
+            } catch (error) {
+              console.debug('[sable worker] closed port call not left', error);
+            }
+          }
+        })
+      );
+    }
   }
 
   function broadcast(message: WorkerMessage): void {
@@ -187,6 +238,11 @@ export function createCoreWorkerBoundary(
     const routed = new Map<WorkerPort, CoreEvent[]>();
 
     for (const event of JSON.parse(json) as CoreEvent[]) {
+      if (event.type === 'call_signaling_error' && event.fatal) {
+        callSessions.delete(event.session);
+      } else if (event.type === 'session_ended') {
+        callSessions.clear();
+      }
       if (event.type === 'timeline_diff' || event.type === 'timeline_pagination') {
         const owner = timelineEvents.route(event);
         if (!owner) continue;
@@ -439,6 +495,36 @@ export function createCoreWorkerBoundary(
             }
             throw new Error('Timeline startup overflowed; retry opening the room');
           }
+          if (method === 'calls.join') {
+            if (!ports.has(port)) return;
+            const joining = timedCall(instance, method, params);
+            const tracked = joining.then(async (raw) => {
+              const ok = JSON.parse(raw) as RpcResult<Rpc['calls']['join']>;
+              if (typeof ok.session === 'number') {
+                if (!ports.has(port)) {
+                  await instance.call('calls.leave', JSON.stringify({ session: ok.session }));
+                  return null;
+                }
+                callSessions.set(ok.session, port);
+              }
+              return ok;
+            });
+            void trackCallLeave(tracked);
+            const ok = await tracked;
+            if (ok !== null && ports.has(port)) {
+              port.postMessage({ id, ok } satisfies WorkerMessage);
+            }
+            return;
+          }
+          if (method === 'calls.leave') {
+            const session = (request.call.params as { session?: CallSessionId } | null)?.session;
+            if (typeof session === 'number') callSessions.delete(session);
+            const leaving = timedCall(instance, method, params);
+            void trackCallLeave(leaving);
+            const ok: unknown = JSON.parse(await leaving);
+            if (ports.has(port)) port.postMessage({ id, ok } satisfies WorkerMessage);
+            return;
+          }
           const ok: unknown = JSON.parse(await timedCall(instance, method, params));
           if (method === 'timeline.unsubscribe') {
             timelineEvents.release(
@@ -469,6 +555,7 @@ export function createCoreWorkerBoundary(
 
   return {
     connect,
+    drainCallCleanups,
     handleEvent,
     handleLog,
     handleSpan,

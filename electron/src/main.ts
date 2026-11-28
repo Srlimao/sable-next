@@ -58,7 +58,8 @@ import {
   windowShortcut,
 } from './navigation';
 import { enforcePermissions } from './permissions';
-import { flushWritesBeforeQuit, writeJson } from './persistence';
+import { flushWrites, flushWritesBeforeQuit, writeJson } from './persistence';
+import { createQuitGuard, endCoreCalls } from './quit';
 import { spellCheckerLanguages } from './spellcheck';
 import { writeDownload } from './downloads';
 import { shareFile } from './share';
@@ -1094,6 +1095,10 @@ if (!app.requestSingleInstanceLock()) {
     showMainWindow();
   });
 
+  const waitBeforeQuit = createQuitGuard(async () => {
+    await Promise.allSettled([endCoreCalls(core), flushWrites()]);
+  });
+
   app.on('before-quit', (event) => {
     if (!quitting) {
       quitting = true;
@@ -1104,6 +1109,12 @@ if (!app.requestSingleInstanceLock()) {
       persistWindowState();
       desktopTray.destroy();
     }
+    if (
+      waitBeforeQuit(event, () => {
+        app.quit();
+      })
+    )
+      return;
     flushWritesBeforeQuit(event, () => {
       app.quit();
     });

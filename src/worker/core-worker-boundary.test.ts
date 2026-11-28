@@ -829,3 +829,146 @@ describe('sync activity', () => {
     expect(setActive).toHaveBeenCalledExactlyOnceWith(true);
   });
 });
+
+describe('call session ownership', () => {
+  test('closing a port leaves its active call even without timeline subscriptions', async () => {
+    const calls: { method: string; params: unknown }[] = [];
+    let nextSession = 42;
+    const boundary = createCoreWorkerBoundary(
+      Promise.resolve(
+        fakeCore((method, params) => {
+          calls.push({ method, params: JSON.parse(params) });
+          if (method === 'calls.join') {
+            return Promise.resolve(JSON.stringify({ session: nextSession++ }));
+          }
+          return Promise.resolve('null');
+        })
+      )
+    );
+    const first = new FakePort();
+    const second = new FakePort();
+    boundary.connect(first);
+    boundary.connect(second);
+
+    await first.send({ id: 1, call: { method: 'calls.join', params: { room_id: '!r1:example' } } });
+    await second.send({
+      id: 2,
+      call: { method: 'calls.join', params: { room_id: '!r2:example' } },
+    });
+
+    await first.send({ disconnect: true });
+    await boundary.drainCallCleanups();
+
+    expect(calls).toEqual([
+      { method: 'calls.join', params: { room_id: '!r1:example' } },
+      { method: 'calls.join', params: { room_id: '!r2:example' } },
+      { method: 'calls.leave', params: { session: 42 } },
+    ]);
+  });
+
+  test('closing a port while calls.join is in flight leaves the call once join resolves', async () => {
+    const joinGate = Promise.withResolvers<string>();
+    const calls: { method: string; params: unknown }[] = [];
+    const boundary = createCoreWorkerBoundary(
+      Promise.resolve(
+        fakeCore((method, params) => {
+          calls.push({ method, params: JSON.parse(params) });
+          if (method === 'calls.join') return joinGate.promise;
+          return Promise.resolve('null');
+        })
+      )
+    );
+    const port = new FakePort();
+    boundary.connect(port);
+
+    void port.onmessage?.({
+      data: { id: 1, call: { method: 'calls.join', params: { room_id: '!r1:example' } } },
+    } as MessageEvent<WorkerRequest>);
+    await Promise.resolve();
+    await port.send({ disconnect: true });
+
+    joinGate.resolve(JSON.stringify({ session: 77 }));
+    await boundary.drainCallCleanups();
+
+    expect(calls).toEqual([
+      { method: 'calls.join', params: { room_id: '!r1:example' } },
+      { method: 'calls.leave', params: { session: 77 } },
+    ]);
+    expect(port.messages).toEqual([]);
+  });
+
+  test('explicit calls.leave releases ownership and drainCallCleanups waits for it', async () => {
+    const leaveGate = Promise.withResolvers<string>();
+    const calls: { method: string; params: unknown }[] = [];
+    const boundary = createCoreWorkerBoundary(
+      Promise.resolve(
+        fakeCore((method, params) => {
+          calls.push({ method, params: JSON.parse(params) });
+          if (method === 'calls.join') return Promise.resolve(JSON.stringify({ session: 9 }));
+          if (method === 'calls.leave') return leaveGate.promise;
+          return Promise.resolve('null');
+        })
+      )
+    );
+    const port = new FakePort();
+    boundary.connect(port);
+
+    await port.send({ id: 1, call: { method: 'calls.join', params: { room_id: '!r1:example' } } });
+    void port.onmessage?.({
+      data: { id: 2, call: { method: 'calls.leave', params: { session: 9 } } },
+    } as MessageEvent<WorkerRequest>);
+    await Promise.resolve();
+
+    let drained = false;
+    const draining = boundary.drainCallCleanups().then(() => {
+      drained = true;
+    });
+    await Promise.resolve();
+    expect(drained).toBe(false);
+
+    leaveGate.resolve('null');
+    await draining;
+    expect(drained).toBe(true);
+
+    await port.send({ disconnect: true });
+    await boundary.drainCallCleanups();
+    expect(calls.filter((entry) => entry.method === 'calls.leave')).toHaveLength(1);
+  });
+
+  test('fatal call_signaling_error and session_ended clear tracked call sessions', async () => {
+    const calls: string[] = [];
+    const boundary = createCoreWorkerBoundary(
+      Promise.resolve(
+        fakeCore((method) => {
+          calls.push(method);
+          if (method === 'calls.join') {
+            return Promise.resolve(JSON.stringify({ session: calls.length }));
+          }
+          return Promise.resolve('null');
+        })
+      )
+    );
+    const first = new FakePort();
+    const second = new FakePort();
+    boundary.connect(first);
+    boundary.connect(second);
+
+    await first.send({ id: 1, call: { method: 'calls.join', params: { room_id: '!r1:example' } } });
+    await second.send({
+      id: 2,
+      call: { method: 'calls.join', params: { room_id: '!r2:example' } },
+    });
+
+    boundary.handleEvent(
+      JSON.stringify([{ type: 'call_signaling_error', session: 1, stage: 'sync', fatal: true }])
+    );
+    await first.send({ disconnect: true });
+    await boundary.drainCallCleanups();
+
+    boundary.handleEvent(JSON.stringify([{ type: 'session_ended', reason: 'signed out' }]));
+    await second.send({ disconnect: true });
+    await boundary.drainCallCleanups();
+
+    expect(calls).toEqual(['calls.join', 'calls.join']);
+  });
+});
