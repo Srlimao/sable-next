@@ -1,9 +1,13 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { SvelteSet } from 'svelte/reactivity';
   import ArrowsClockwiseIcon from 'phosphor-svelte/lib/ArrowsClockwiseIcon';
   import ArrowsInSimpleIcon from 'phosphor-svelte/lib/ArrowsInSimpleIcon';
   import ArrowsOutSimpleIcon from 'phosphor-svelte/lib/ArrowsOutSimpleIcon';
   import ArrowsVerticalIcon from 'phosphor-svelte/lib/ArrowsVerticalIcon';
+  import CornersInIcon from 'phosphor-svelte/lib/CornersInIcon';
+  import CornersOutIcon from 'phosphor-svelte/lib/CornersOutIcon';
+  import ListBulletsIcon from 'phosphor-svelte/lib/ListBulletsIcon';
   import LockSimpleIcon from 'phosphor-svelte/lib/LockSimpleIcon';
   import LockSimpleOpenIcon from 'phosphor-svelte/lib/LockSimpleOpenIcon';
   import PauseIcon from 'phosphor-svelte/lib/PauseIcon';
@@ -27,24 +31,30 @@
 
   interface Props {
     roomId: string;
+    session?: WatchTogetherSession;
     canManage?: boolean;
     members?: readonly MemberView[];
     theater?: boolean;
+    maximized?: boolean;
     pendingUrl?: string | null;
     onConsumePendingUrl?: () => void;
     onToggleTheater?: () => void;
+    onToggleMaximize?: () => void;
     onCloseTheater?: () => void;
     onEnsureRoomWidget?: (fallbackUrl: string) => Promise<void>;
   }
 
   let {
     roomId,
+    session: providedSession,
     canManage = false,
     members = [],
     theater = false,
+    maximized = false,
     pendingUrl = null,
     onConsumePendingUrl,
     onToggleTheater,
+    onToggleMaximize,
     onCloseTheater,
     onEnsureRoomWidget,
   }: Props = $props();
@@ -56,6 +66,8 @@
   let shortsScrollMode = $state(readText(SHORTS_SCROLL_KEY) === '1');
   let urlError = $state<string | null>(null);
   let player = $state<YoutubeSyncPlayer>();
+  let queueUserOverride = $state<boolean | null>(null);
+  let lastModeKey = '';
 
   let moderatorIds = $derived.by(() => {
     const ids = new SvelteSet<string>();
@@ -66,24 +78,36 @@
     return ids;
   });
 
-  const session = new WatchTogetherSession({
-    core,
-    get roomId() {
-      return roomId;
-    },
-    get userId() {
-      return core.session?.user_id ?? '';
-    },
-    isModerator: () => canManage || moderatorIds.has(core.session?.user_id ?? ''),
-    moderatorIds: () => moderatorIds,
-    onEnsureRoomWidget: (...args) => onEnsureRoomWidget?.(...args) ?? Promise.resolve(),
-  });
+  const initialSession = untrack(() => providedSession);
+  const fallbackSession =
+    initialSession ??
+    new WatchTogetherSession({
+      core,
+      get roomId() {
+        return roomId;
+      },
+      get userId() {
+        return core.session?.user_id ?? '';
+      },
+      isModerator: () => canManage || moderatorIds.has(core.session?.user_id ?? ''),
+      moderatorIds: () => moderatorIds,
+      onEnsureRoomWidget: (...args) => onEnsureRoomWidget?.(...args) ?? Promise.resolve(),
+    });
+  const ownedSession = initialSession ? null : fallbackSession;
+  const session = $derived(providedSession ?? fallbackSession);
 
   let isCurrentLive = $derived(
     session.state.current?.kind === 'live' ||
       (session.state.current !== null && detectedLiveVideoId === session.state.current.videoId)
   );
   let isCurrentShort = $derived(!isCurrentLive && session.state.current?.kind === 'short');
+  let showQueue = $derived(
+    !theater && !maximized
+      ? true
+      : queueUserOverride !== null
+        ? queueUserOverride
+        : session.state.current === null || (theater && session.state.queue.length > 0)
+  );
 
   function memberName(userId: string): string {
     return members.find((member) => member.user_id === userId)?.display_name ?? userId;
@@ -106,6 +130,7 @@
   }
 
   function resync(): void {
+    void session.refresh();
     syncVersion += 1;
   }
 
@@ -116,7 +141,16 @@
 
   $effect(() => {
     const _room = roomId;
-    if (_room) return session.start();
+    if (!ownedSession || !_room) return;
+    return ownedSession.start();
+  });
+
+  $effect(() => {
+    const modeKey = `${theater}:${maximized}`;
+    if (modeKey !== lastModeKey) {
+      lastModeKey = modeKey;
+      queueUserOverride = null;
+    }
   });
 
   $effect(() => {
@@ -127,7 +161,7 @@
   });
 </script>
 
-<div class={['watch-together', { theater }]}>
+<div class={['watch-together', { theater, maximized }]}>
   <div class="status-bar">
     <div class="status-meta">
       <span class={['badge', { playing: session.state.playing, locked: session.state.locked }]}>
@@ -182,24 +216,54 @@
           {/if}
         </IconButton>
       {/if}
+      {#if theater || maximized}
+        <IconButton
+          variant="ghost"
+          size="small"
+          label={i18n.t('widgets.watchTogetherToggleQueue')}
+          aria-pressed={showQueue}
+          onclick={() => {
+            queueUserOverride = !showQueue;
+          }}
+        >
+          <ListBulletsIcon weight={showQueue ? 'fill' : 'regular'} />
+        </IconButton>
+      {/if}
       {#if onToggleTheater}
         <IconButton
           variant="ghost"
           size="small"
-          label={theater
+          label={theater || maximized
             ? i18n.t('widgets.watchTogetherDock')
             : i18n.t('widgets.watchTogetherTheater')}
           aria-pressed={theater}
           onclick={onToggleTheater}
         >
-          {#if theater}
+          {#if theater || maximized}
             <ArrowsInSimpleIcon />
           {:else}
             <ArrowsOutSimpleIcon />
           {/if}
         </IconButton>
       {/if}
-      {#if theater && onCloseTheater}
+      {#if onToggleMaximize}
+        <IconButton
+          variant="ghost"
+          size="small"
+          label={maximized
+            ? i18n.t('widgets.watchTogetherRestore')
+            : i18n.t('widgets.watchTogetherMaximize')}
+          aria-pressed={maximized}
+          onclick={onToggleMaximize}
+        >
+          {#if maximized}
+            <CornersInIcon />
+          {:else}
+            <CornersOutIcon />
+          {/if}
+        </IconButton>
+      {/if}
+      {#if (theater || maximized) && onCloseTheater}
         <IconButton
           variant="ghost"
           size="small"
@@ -221,7 +285,7 @@
       <Spinner label={i18n.t('widgets.watchTogether')} />
     </div>
   {:else}
-    <div class="layout">
+    <div class={['layout', { 'with-queue': showQueue }]}>
       <div class="stage-col">
         {#if session.state.current}
           {@const current = session.state.current}
@@ -234,6 +298,7 @@
             syncEpoch={session.syncEpoch}
             {syncVersion}
             {theater}
+            {maximized}
             canControl={session.canControl}
             shortsScrollMode={isCurrentShort && shortsScrollMode}
             canScrollPrev={session.canScrollPrevShort}
@@ -299,34 +364,44 @@
         {/if}
       </div>
 
-      <WatchTogetherQueue
-        queue={session.state.queue}
-        canControl={session.canControl}
-        adding={session.adding}
-        {urlError}
-        {memberName}
-        onAddUrl={addUrl}
-        onPlayItem={(id) => void session.playItem(id)}
-        onMoveItem={(id, delta) => void session.moveItem(id, delta)}
-        onRemoveItem={(id) => void session.removeItem(id)}
-      />
+      {#if showQueue}
+        <WatchTogetherQueue
+          queue={session.state.queue}
+          canControl={session.canControl}
+          adding={session.adding}
+          {urlError}
+          {memberName}
+          onAddUrl={addUrl}
+          onPlayItem={(id) => void session.playItem(id)}
+          onMoveItem={(id, delta) => void session.moveItem(id, delta)}
+          onRemoveItem={(id) => void session.removeItem(id)}
+        />
+      {/if}
     </div>
   {/if}
 </div>
 
 <style>
   .watch-together {
+    box-sizing: border-box;
+    container-type: inline-size;
     display: flex;
     flex-direction: column;
     gap: var(--space-250);
     height: 100%;
     min-height: 0;
+    overflow: hidden;
     padding: var(--space-300);
+  }
+
+  .watch-together.maximized {
+    background: var(--bg-container);
   }
 
   .status-bar {
     align-items: center;
     display: flex;
+    flex-shrink: 0;
     gap: var(--space-150);
     justify-content: space-between;
   }
@@ -384,23 +459,43 @@
     flex-direction: column;
     gap: var(--space-250);
     min-height: 0;
-  }
-
-  .theater .layout {
-    display: grid;
-    grid-template-columns: minmax(0, 1.5fr) minmax(16rem, 1fr);
+    overflow: hidden;
   }
 
   .stage-col {
     display: flex;
+    flex: 1;
     flex-direction: column;
     gap: var(--space-200);
     min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .watch-together.theater .layout.with-queue .stage-col,
+  .watch-together.maximized .layout.with-queue .stage-col {
+    flex: 1 1 60%;
+    min-height: 10rem;
+  }
+
+  @container (min-width: 44rem) {
+    .watch-together.theater .layout.with-queue,
+    .watch-together.maximized .layout.with-queue {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(16rem, 20rem);
+      grid-template-rows: minmax(0, 1fr);
+    }
+
+    .watch-together.theater .layout.with-queue .stage-col,
+    .watch-together.maximized .layout.with-queue .stage-col {
+      min-height: 0;
+    }
   }
 
   .now-playing {
     align-items: center;
     display: flex;
+    flex-shrink: 0;
     gap: var(--space-200);
     justify-content: space-between;
   }

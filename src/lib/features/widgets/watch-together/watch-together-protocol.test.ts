@@ -152,3 +152,25 @@ test('preserves live and short item kinds in parsed and reduced state', () => {
   expect(state.current?.kind).toBe('live');
   expect(state.queue[0]?.kind).toBe('short');
 });
+
+test('uses authoritative originServerTs for ordering and projection over skewed client sentAtMs', () => {
+  const earlier = mustParse(
+    rawEvent('$first', '@alice:example.org', 10_000, {
+      sentAtMs: 99_999,
+      positionSec: 10,
+      action: 'play',
+    })
+  );
+  const later = mustParse(
+    rawEvent('$second', '@bob:example.org', 15_000, {
+      sentAtMs: 5_000,
+      positionSec: 25,
+      action: 'seek',
+    })
+  );
+
+  const state = reduceWatchTogetherEvents([later, earlier]);
+  expect(state.lastEventId).toBe('$second');
+  expect(state.sentAtMs).toBe(15_000);
+  expect(expectedPositionSec(state, 20_000)).toBe(30);
+});

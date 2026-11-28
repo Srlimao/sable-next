@@ -3,6 +3,7 @@
   import type { RoomListItemView } from '#src/generated/protocol';
   import type { MatrixLink } from '#lib/rooms/matrix-link.js';
   import type { RoomMemberLoader } from '#lib/rooms/room-members.svelte.js';
+  import type { WatchTogetherSession } from '#lib/features/widgets/watch-together/watch-together-session.svelte.js';
   import RoomAttachmentsPanel from './RoomAttachmentsPanel.svelte';
   import RoomMembersPanel from './RoomMembersPanel.svelte';
   import RoomNotificationsPanel from './RoomNotificationsPanel.svelte';
@@ -22,6 +23,7 @@
     memberLoader: RoomMemberLoader;
     roomSession: RoomSession;
     canManageWidgets: boolean;
+    watchTogetherSession: WatchTogetherSession;
     onOpenThread: (rootEventId: string) => void;
     onJump: (eventId: string) => void;
     onMatrixLink: (link: MatrixLink, anchor: HTMLAnchorElement) => void;
@@ -37,6 +39,7 @@
     memberLoader,
     roomSession,
     canManageWidgets,
+    watchTogetherSession,
     onOpenThread,
     onJump,
     onMatrixLink,
@@ -97,4 +100,5 @@
   {memberLoader}
   {roomSession}
   canManage={canManageWidgets}
+  {watchTogetherSession}
 />

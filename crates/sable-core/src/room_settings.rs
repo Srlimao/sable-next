@@ -731,6 +731,21 @@ impl SignedIn {
             })
             .collect();
 
+        if event_type == "im.vector.modular.widgets"
+            && room.state() == matrix_sdk::RoomState::Joined
+        {
+            if let Some(probed) = self.probed_state().events(room_id, event_type) {
+                return Ok(probed);
+            }
+            if let Ok(snapshot) = self.room_state_snapshot(room.room_id()).await {
+                let state = room_state_by_type(&snapshot);
+                let fresh = state.get(event_type).cloned().unwrap_or_default();
+                self.probed_state().remember_full(room_id, state);
+                return Ok(fresh);
+            }
+            return Ok(events);
+        }
+
         if !events.is_empty() {
             return Ok(events);
         }

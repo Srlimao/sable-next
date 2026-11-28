@@ -227,7 +227,9 @@ export function reduceWatchTogetherEvents(
   const ordered = [...events].sort((a, b) =>
     a.originServerTs !== b.originServerTs
       ? a.originServerTs - b.originServerTs
-      : a.eventId.localeCompare(b.eventId)
+      : a.snapshot.sentAtMs !== b.snapshot.sentAtMs
+        ? a.snapshot.sentAtMs - b.snapshot.sentAtMs
+        : a.eventId.localeCompare(b.eventId)
   );
 
   let state = emptyWatchTogetherState();
@@ -252,7 +254,7 @@ export function reduceWatchTogetherEvents(
         0,
         snapshot.positionMs !== undefined ? snapshot.positionMs / 1000 : snapshot.positionSec
       ),
-      sentAtMs: snapshot.sentAtMs,
+      sentAtMs: event.originServerTs > 0 ? event.originServerTs : snapshot.sentAtMs,
       current: snapshot.current,
       queue: snapshot.queue,
       lastAction: snapshot.action,

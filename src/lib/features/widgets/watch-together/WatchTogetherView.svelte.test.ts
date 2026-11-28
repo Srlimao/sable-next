@@ -4,6 +4,7 @@
 import { render, screen } from '@testing-library/svelte';
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import TooltipProvider from '#lib/ui/primitives/TooltipProvider.svelte';
 
 vi.mock('#lib/core/context.js');
 vi.mock('#lib/features/room/media/embeds/youtube.js', async (importOriginal) => {
@@ -645,4 +646,251 @@ test('releases stuck iframe focus and hover while playing unless dragging', asyn
   await Promise.resolve();
   expect(frame).toHaveClass('unhovered');
   expect(document.activeElement).toBe(wrap);
+});
+
+test('late-join YT_UNSTARTED -> YT_PLAYING drift seeks locally without rewinding the room', async () => {
+  let nowMs = 1_700_000_000_000;
+  vi.spyOn(Date, 'now').mockImplementation(() => nowMs);
+
+  const sendRawEvent = vi.fn().mockResolvedValue('$evt-1');
+  core.rpc = mockRpc({
+    timeline: {
+      events: vi.fn().mockResolvedValue([
+        {
+          room_id: '!room:example.org',
+          type: WATCH_TOGETHER_EVENT_TYPE,
+          event_id: '$remote-1',
+          sender: '@bob:example.org',
+          origin_server_ts: nowMs - 10_000,
+          content: {
+            v: 1,
+            sessionId: 'sess-1',
+            hostUserId: '@bob:example.org',
+            locked: false,
+            playing: true,
+            positionSec: 40,
+            sentAtMs: nowMs - 10_000,
+            current: {
+              id: 'item-1',
+              source: 'youtube',
+              videoId: 'dQw4w9WgXcQ',
+              title: 'Remote Video',
+              author: 'Bob',
+              thumbnailUrl: 'https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg',
+              addedBy: '@bob:example.org',
+            },
+            queue: [],
+            action: 'play',
+          },
+        },
+      ]),
+    },
+    messages: { sendRawEvent },
+    widgets: { setWidgetFeed: vi.fn().mockResolvedValue(null) },
+  });
+
+  renderWithTooltips(WatchTogetherView, {
+    roomId: '!room:example.org',
+    canManage: true,
+    members: [],
+  });
+
+  expect(await screen.findByText('Remote Video')).toBeInTheDocument();
+  const win = getPlayerWindow();
+  const postSpy = vi.spyOn(win, 'postMessage').mockImplementation(() => {});
+
+  dispatchYoutubeEvent(win, { event: 'onReady' });
+  postSpy.mockClear();
+
+  // Simulate infoDelivery reporting player at 0s after suppression ends, then YT_PLAYING
+  nowMs += 3000;
+  dispatchYoutubeEvent(win, {
+    event: 'infoDelivery',
+    info: { playerState: -1, currentTime: 0, videoData: { video_id: 'dQw4w9WgXcQ' } },
+  });
+  dispatchYoutubeEvent(win, { event: 'onStateChange', info: 1 });
+  await Promise.resolve();
+
+  expect(sendRawEvent).not.toHaveBeenCalled();
+  expect(postSpy).toHaveBeenCalledWith(expect.stringContaining('"seekTo"'), '*');
+});
+
+test('playback stalls do not emit false local seeks', async () => {
+  let nowMs = 1_700_000_000_000;
+  vi.spyOn(Date, 'now').mockImplementation(() => nowMs);
+
+  const sendRawEvent = vi.fn().mockResolvedValue('$evt-1');
+  core.rpc = mockRpc({
+    timeline: { events: vi.fn().mockResolvedValue([]) },
+    messages: { sendRawEvent },
+    widgets: { setWidgetFeed: vi.fn().mockResolvedValue(null) },
+  });
+
+  const user = userEvent.setup();
+  renderWithTooltips(WatchTogetherView, {
+    roomId: '!room:example.org',
+    canManage: true,
+    members: [],
+  });
+
+  const input = await screen.findByPlaceholderText('Paste a YouTube link or video ID…');
+  await user.type(input, 'https://youtu.be/dQw4w9WgXcQ');
+  await user.click(screen.getByRole('button', { name: 'Add' }));
+  expect(await screen.findByText('Test Video')).toBeInTheDocument();
+
+  const win = getPlayerWindow();
+  vi.spyOn(win, 'postMessage').mockImplementation(() => {});
+  dispatchYoutubeEvent(win, { event: 'onReady' });
+  nowMs += 3000;
+  dispatchYoutubeEvent(win, {
+    event: 'infoDelivery',
+    info: { playerState: 1, currentTime: 10, videoData: { video_id: 'dQw4w9WgXcQ' } },
+  });
+  sendRawEvent.mockClear();
+
+  // Video stalls for 4 seconds without currentTime advancing
+  nowMs += 4000;
+  dispatchYoutubeEvent(win, {
+    event: 'infoDelivery',
+    info: { playerState: 1, currentTime: 10.2, videoData: { video_id: 'dQw4w9WgXcQ' } },
+  });
+  await Promise.resolve();
+
+  expect(sendRawEvent).not.toHaveBeenCalled();
+});
+
+test('own echo updates optimistic timestamp so remote events with lower local clock still win', async () => {
+  const localClock = 1_700_000_060_000;
+  const serverClock = 1_700_000_000_000;
+  vi.spyOn(Date, 'now').mockImplementation(() => localClock);
+
+  const sendRawEvent = vi.fn().mockResolvedValue('$own-1');
+  core.rpc = mockRpc({
+    timeline: { events: vi.fn().mockResolvedValue([]) },
+    messages: { sendRawEvent },
+    widgets: { setWidgetFeed: vi.fn().mockResolvedValue(null) },
+  });
+
+  const user = userEvent.setup();
+  renderWithTooltips(WatchTogetherView, {
+    roomId: '!room:example.org',
+    canManage: true,
+    members: [],
+  });
+
+  const input = await screen.findByPlaceholderText('Paste a YouTube link or video ID…');
+  await user.type(input, 'https://youtu.be/dQw4w9WgXcQ');
+  await user.click(screen.getByRole('button', { name: 'Add' }));
+  expect(await screen.findByText('Test Video')).toBeInTheDocument();
+
+  // Server echoes own event with authoritative earlier server timestamp
+  for (const listener of listeners) {
+    listener({
+      type: 'widget_room_event',
+      event: {
+        room_id: '!room:example.org',
+        type: WATCH_TOGETHER_EVENT_TYPE,
+        event_id: '$own-1',
+        sender: '@alice:example.org',
+        origin_server_ts: serverClock,
+        content: {
+          v: 1,
+          sessionId: 'sess-own',
+          hostUserId: '@alice:example.org',
+          locked: false,
+          playing: true,
+          positionSec: 0,
+          positionMs: 0,
+          sentAtMs: localClock,
+          current: {
+            id: 'item-own',
+            source: 'youtube',
+            videoId: 'dQw4w9WgXcQ',
+            title: 'Test Video',
+            author: 'Test Author',
+            thumbnailUrl: 'https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg',
+            addedBy: '@alice:example.org',
+          },
+          queue: [],
+          action: 'load',
+        },
+      },
+    });
+  }
+
+  // Remote user acts 5s later on server clock (still < localClock)
+  for (const listener of listeners) {
+    listener({
+      type: 'widget_room_event',
+      event: {
+        room_id: '!room:example.org',
+        type: WATCH_TOGETHER_EVENT_TYPE,
+        event_id: '$remote-2',
+        sender: '@bob:example.org',
+        origin_server_ts: serverClock + 5000,
+        content: {
+          v: 1,
+          sessionId: 'sess-own',
+          hostUserId: '@alice:example.org',
+          locked: false,
+          playing: false,
+          positionSec: 5,
+          sentAtMs: serverClock + 5000,
+          current: {
+            id: 'item-own',
+            source: 'youtube',
+            videoId: 'dQw4w9WgXcQ',
+            title: 'Test Video',
+            author: 'Test Author',
+            thumbnailUrl: 'https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg',
+            addedBy: '@alice:example.org',
+          },
+          queue: [],
+          action: 'pause',
+        },
+      },
+    });
+  }
+
+  expect(await screen.findByText('Paused')).toBeInTheDocument();
+});
+
+test('supports maximize/restore button and collapsible queue toggle in theater/maximized modes', async () => {
+  core.rpc = mockRpc({
+    timeline: { events: vi.fn().mockResolvedValue([]) },
+    widgets: { setWidgetFeed: vi.fn().mockResolvedValue(null) },
+  });
+
+  const onToggleMaximize = vi.fn();
+  const user = userEvent.setup();
+  const rendered = render(
+    WatchTogetherView,
+    {
+      roomId: '!room:example.org',
+      canManage: true,
+      members: [],
+      theater: true,
+      onToggleMaximize,
+    },
+    { wrapper: TooltipProvider }
+  );
+
+  const maxBtn = await screen.findByRole('button', { name: 'Maximize Watch Together' });
+  await user.click(maxBtn);
+  expect(onToggleMaximize).toHaveBeenCalledOnce();
+
+  const queueToggle = screen.getByRole('button', { name: 'Toggle queue' });
+  expect(screen.getByPlaceholderText('Paste a YouTube link or video ID…')).toBeInTheDocument();
+  await user.click(queueToggle);
+  expect(screen.queryByPlaceholderText('Paste a YouTube link or video ID…')).not.toBeInTheDocument();
+
+  await rendered.rerender({
+    roomId: '!room:example.org',
+    canManage: true,
+    members: [],
+    theater: false,
+    maximized: true,
+    onToggleMaximize,
+  });
+  expect(screen.getByRole('button', { name: 'Exit maximized view' })).toBeInTheDocument();
 });

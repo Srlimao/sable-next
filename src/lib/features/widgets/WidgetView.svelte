@@ -9,6 +9,7 @@
 
   import { type CapabilityDecision, approveCapabilities } from './capabilities.js';
   import { WATCH_TOGETHER_WIDGET_TYPE } from './watch-together/watch-together-protocol.js';
+  import type { WatchTogetherSession } from './watch-together/watch-together-session.svelte.js';
   import WatchTogetherView from './watch-together/WatchTogetherView.svelte';
   import type { RoomWidget } from './widget-content.js';
   import { attachScalarToken, needsScalarToken } from './widget-url.js';
@@ -23,9 +24,11 @@
     canManage?: boolean;
     members?: readonly MemberView[];
     theater?: boolean;
+    watchTogetherSession?: WatchTogetherSession;
     pendingWatchUrl?: string | null;
     onConsumePendingWatchUrl?: () => void;
     onToggleTheater?: () => void;
+    onToggleMaximize?: () => void;
     onEnsureWatchWidget?: (fallbackUrl: string) => Promise<void>;
   }
 
@@ -37,9 +40,11 @@
     canManage = false,
     members = [],
     theater = false,
+    watchTogetherSession,
     pendingWatchUrl = null,
     onConsumePendingWatchUrl,
     onToggleTheater,
+    onToggleMaximize,
     onEnsureWatchWidget,
   }: Props = $props();
 
@@ -145,12 +150,14 @@
   {#if isWatchTogether}
     <WatchTogetherView
       {roomId}
+      session={watchTogetherSession}
       {canManage}
       {members}
       {theater}
       pendingUrl={pendingWatchUrl}
       onConsumePendingUrl={onConsumePendingWatchUrl}
       {onToggleTheater}
+      {onToggleMaximize}
       onEnsureRoomWidget={onEnsureWatchWidget}
     />
   {:else if terms !== null}

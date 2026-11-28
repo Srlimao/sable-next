@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
 import { fireEvent, render, screen } from '@testing-library/svelte';
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 
 import { RoomPanels } from './room-panels.svelte.js';
 import RoomHeaderActions from './RoomHeaderActions.svelte';
@@ -50,4 +50,36 @@ test('the compact thread shortcut announces its unread thread count', () => {
   const threadButton = screen.getByRole('button', { name: 'Threads, 3 unread threads' });
   expect(threadButton).toHaveTextContent('3');
   expect(screen.getAllByRole('button')).toEqual([threadButton]);
+});
+
+test('shows a Watch Together shortcut button when active and not already visible', async () => {
+  const panels = new RoomPanels();
+  const onOpenWatchTogether = vi.fn();
+  const { rerender } = render(RoomHeaderActions, {
+    panels,
+    voiceView: false,
+    direct: false,
+    desktop: true,
+    widgetCount: 0,
+    watchTogetherActive: true,
+    watchTogetherTitle: 'Test Video',
+    onOpenWatchTogether,
+  });
+
+  const btn = screen.getByRole('button', { name: 'Watch Together: Test Video' });
+  await fireEvent.click(btn);
+  expect(onOpenWatchTogether).toHaveBeenCalledOnce();
+
+  panels.openWatchTogether();
+  await rerender({
+    panels,
+    voiceView: false,
+    direct: false,
+    desktop: true,
+    widgetCount: 0,
+    watchTogetherActive: true,
+    watchTogetherTitle: 'Test Video',
+    onOpenWatchTogether,
+  });
+  expect(screen.queryByRole('button', { name: 'Watch Together: Test Video' })).not.toBeInTheDocument();
 });

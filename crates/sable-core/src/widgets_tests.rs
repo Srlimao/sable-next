@@ -625,6 +625,45 @@ async fn the_feed_forwards_synced_events_only_while_it_is_on() {
 }
 
 #[tokio::test]
+async fn watch_together_events_forward_even_when_the_widget_feed_is_off() {
+    let server = MatrixMockServer::new().await;
+    let client = server.client_builder().build().await;
+    let (core, mut events) = Core::new("widgets", Box::new(MemorySessionStore::default()));
+    crate::test_support::sign_in(&core, &server, client.clone()).await;
+    let session = core.signed_in().unwrap();
+    session.watch_widget_feed(1);
+    let room_id = room_id!("!wtfeed:example.org");
+    let wt_event = ruma::serde::Raw::new(&json!({
+        "type": "moe.sable.watch_together",
+        "event_id": "$wt-1",
+        "sender": "@alice:example.org",
+        "origin_server_ts": 2,
+        "content": { "v": 1 }
+    }))
+    .unwrap()
+    .cast_unchecked::<ruma::events::AnySyncTimelineEvent>();
+
+    server
+        .sync_room(
+            &client,
+            JoinedRoomBuilder::new(room_id).add_timeline_event(wt_event),
+        )
+        .await;
+
+    let forwarded = tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if let Some(CoreEvent::WidgetRoomEvent { event }) = events.recv().await {
+                break event;
+            }
+        }
+    })
+    .await
+    .expect("Watch Together event should forward with widget feed off");
+    assert_eq!(forwarded["event_id"], "$wt-1");
+    assert_eq!(forwarded["room_id"], room_id.as_str());
+}
+
+#[tokio::test]
 async fn a_widget_state_change_tells_the_room_to_reload_its_widgets() {
     let server = MatrixMockServer::new().await;
     let client = server.client_builder().build().await;

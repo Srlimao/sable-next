@@ -1,7 +1,10 @@
 <script lang="ts">
   import { useCoreClient } from '#lib/core/context.js';
   import { i18n } from '#lib/i18n.js';
-  import { ensureWatchTogetherRoomWidget } from '#lib/features/widgets/watch-together/watch-together-session.svelte.js';
+  import {
+    ensureWatchTogetherRoomWidget,
+    type WatchTogetherSession,
+  } from '#lib/features/widgets/watch-together/watch-together-session.svelte.js';
   import WidgetsPanel from '#lib/features/widgets/WidgetsPanel.svelte';
   import type { RoomMemberLoader } from '#lib/rooms/room-members.svelte.js';
   import DialogFrame from '#lib/ui/primitives/DialogFrame.svelte';
@@ -16,9 +19,18 @@
     memberLoader: RoomMemberLoader;
     roomSession: RoomSession;
     canManage: boolean;
+    watchTogetherSession: WatchTogetherSession;
   }
 
-  let { panels, roomId, desktop, memberLoader, roomSession, canManage }: Props = $props();
+  let {
+    panels,
+    roomId,
+    desktop,
+    memberLoader,
+    roomSession,
+    canManage,
+    watchTogetherSession,
+  }: Props = $props();
   const core = useCoreClient();
 
   let ownMember = $derived(
@@ -70,11 +82,14 @@
     {canManage}
     members={memberLoader.members}
     {modal}
+    {watchTogetherSession}
     openWatchTogether={panels.watchTogetherActive}
     pendingWatchUrl={panels.pendingWatchUrl}
     onConsumePendingWatchUrl={() => panels.consumePendingWatchUrl()}
     onWatchTogetherOpened={() => panels.clearWatchTogetherOpen()}
+    onWatchTogetherVisibilityChange={(open) => panels.setWatchTogetherDockedOpen(open)}
     onToggleTheater={desktop ? () => panels.toggleWatchTogetherTheater() : undefined}
+    onToggleMaximize={() => panels.toggleWatchTogetherMaximized()}
     onEnsureWatchWidget={ensureWatchWidget}
     onClose={closeWidgets}
     onAdd={addWidget}

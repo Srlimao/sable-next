@@ -17,6 +17,7 @@
     WATCH_TOGETHER_WIDGET_ID,
     WATCH_TOGETHER_WIDGET_TYPE,
   } from './watch-together/watch-together-protocol.js';
+  import type { WatchTogetherSession } from './watch-together/watch-together-session.svelte.js';
   import { widgetPermissionKey } from './capabilities.js';
   import { templateWidgetUrl } from './widget-url.js';
   import WidgetList from './WidgetList.svelte';
@@ -31,11 +32,14 @@
     canManage?: boolean;
     members?: readonly MemberView[];
     modal?: boolean;
+    watchTogetherSession?: WatchTogetherSession;
     openWatchTogether?: boolean;
     pendingWatchUrl?: string | null;
     onConsumePendingWatchUrl?: () => void;
     onWatchTogetherOpened?: () => void;
+    onWatchTogetherVisibilityChange?: (open: boolean) => void;
     onToggleTheater?: () => void;
+    onToggleMaximize?: () => void;
     onEnsureWatchWidget?: (fallbackUrl: string) => Promise<void>;
     onClose: () => void;
     onAdd?: (name: string, url: string) => Promise<void>;
@@ -51,11 +55,14 @@
     canManage = false,
     members = [],
     modal = false,
+    watchTogetherSession,
     openWatchTogether = false,
     pendingWatchUrl = null,
     onConsumePendingWatchUrl,
     onWatchTogetherOpened,
+    onWatchTogetherVisibilityChange,
     onToggleTheater,
+    onToggleMaximize,
     onEnsureWatchWidget,
     onClose,
     onAdd,
@@ -112,6 +119,11 @@
     if (!openWatchTogether) return;
     activeId = watchTogetherWidget.id;
     onWatchTogetherOpened?.();
+  });
+
+  $effect(() => {
+    onWatchTogetherVisibilityChange?.(isWatchTogether);
+    return () => onWatchTogetherVisibilityChange?.(false);
   });
 </script>
 
@@ -175,9 +187,11 @@
         permissionKey={activeKey}
         {canManage}
         {members}
+        {watchTogetherSession}
         {pendingWatchUrl}
         {onConsumePendingWatchUrl}
         {onToggleTheater}
+        {onToggleMaximize}
         {onEnsureWatchWidget}
       />
     {/key}
@@ -186,6 +200,8 @@
       {roomId}
       {widgets}
       {canManage}
+      watchTogetherCurrent={watchTogetherSession?.state.current ?? null}
+      watchTogetherPlaying={watchTogetherSession?.state.playing ?? false}
       onOpen={(id) => (activeId = id)}
       onOpenWatchTogether={() => (activeId = watchTogetherWidget.id)}
       {onAdd}

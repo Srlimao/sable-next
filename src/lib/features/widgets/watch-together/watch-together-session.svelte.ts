@@ -60,6 +60,7 @@ export interface WatchTogetherSessionOptions {
   userId: string;
   isModerator: () => boolean;
   moderatorIds: () => ReadonlySet<string>;
+  acquireFeed?: boolean;
   onEnsureRoomWidget?: (fallbackUrl: string) => Promise<void>;
   fetchShortsSequence?: (
     videoId: string,
@@ -77,6 +78,7 @@ export class WatchTogetherSession {
 
   readonly #opts: WatchTogetherSessionOptions;
   readonly #events = new SvelteMap<string, WatchTogetherEvent>();
+  readonly #optimisticIds = new SvelteSet<string>();
   readonly #ownSentIds = new SvelteSet<string>();
   readonly #ownSentTimestamps = new SvelteSet<number>();
   #shortsHistory = $state.raw<WatchTogetherItem[]>([]);
@@ -85,9 +87,16 @@ export class WatchTogetherSession {
   #shortsSeedId: string | null = null;
   readonly #seenShortIds = new SvelteSet<string>();
   #publishSeq = 0;
+  #serverClockOffsetMs = 0;
+  #hasServerClockOffset = false;
+  #activeRoomId: string | null = null;
 
   constructor(opts: WatchTogetherSessionOptions) {
     this.#opts = opts;
+  }
+
+  get active(): boolean {
+    return this.state.current !== null;
   }
 
   get canControl(): boolean {
@@ -103,35 +112,145 @@ export class WatchTogetherSession {
   }
 
   expectedPosition(nowMs = Date.now()): number {
-    return expectedPositionSec(this.state, nowMs);
+    const useServerClock =
+      this.state.lastEventId !== null &&
+      !this.#optimisticIds.has(this.state.lastEventId) &&
+      this.#hasServerClockOffset;
+    return expectedPositionSec(
+      this.state,
+      useServerClock ? nowMs - this.#serverClockOffsetMs : nowMs
+    );
   }
 
-  start(): () => void {
+  #calibrateServerClock(originServerTs: number, trustLargeSkew: boolean): void {
+    if (!Number.isFinite(originServerTs) || originServerTs <= 0) return;
+    const sample = Date.now() - originServerTs;
+    const maxSample = trustLargeSkew ? 86_400_000 : 60_000;
+    if (Math.abs(sample) >= maxSample) return;
+    if (!this.#hasServerClockOffset) {
+      this.#serverClockOffsetMs = sample;
+      this.#hasServerClockOffset = true;
+      return;
+    }
+    if (Math.abs(sample - this.#serverClockOffsetMs) < 30_000) {
+      this.#serverClockOffsetMs = Math.round(this.#serverClockOffsetMs * 0.7 + sample * 0.3);
+    }
+  }
+
+  #resetForRoom(roomId: string): void {
+    this.#activeRoomId = roomId;
+    this.#events.clear();
+    this.#optimisticIds.clear();
+    this.#ownSentIds.clear();
+    this.#ownSentTimestamps.clear();
+    this.#shortsHistory = [];
+    this.#shortsBuffer = [];
+    this.#shortsContinuation = null;
+    this.#shortsSeedId = null;
+    this.#seenShortIds.clear();
+    this.#publishSeq = 0;
+    this.#serverClockOffsetMs = 0;
+    this.#hasServerClockOffset = false;
+    this.state = emptyWatchTogetherState();
+    this.loading = true;
+    this.adding = false;
+    this.loadingShort = false;
+    this.error = null;
+  }
+
+  #mergeEvents(rawEvents: readonly unknown[]): void {
+    let changed = false;
+    let bumpEpoch = false;
+    const prevEventId = this.state.lastEventId;
+    for (const raw of rawEvents) {
+      const parsed = parseWatchTogetherEvent(raw);
+      if (parsed === null) continue;
+      if (this.#optimisticIds.has(parsed.eventId)) {
+        this.#optimisticIds.delete(parsed.eventId);
+        this.#events.set(parsed.eventId, parsed);
+        this.#calibrateServerClock(parsed.originServerTs, true);
+        changed = true;
+      } else if (!this.#events.has(parsed.eventId)) {
+        this.#events.set(parsed.eventId, parsed);
+        changed = true;
+        bumpEpoch = true;
+      }
+    }
+    if (!changed) return;
+    const nextState = reduceWatchTogetherEvents(
+      [...this.#events.values()],
+      this.#opts.moderatorIds()
+    );
+    this.state = nextState;
+    if (bumpEpoch || nextState.lastEventId !== prevEventId) {
+      this.syncEpoch += 1;
+    }
+  }
+
+  async refresh(): Promise<void> {
+    const roomId = this.#opts.roomId;
+    if (!roomId) return;
+    try {
+      const rawEvents = await this.#opts.core.rpc.timeline.events({
+        room_id: roomId,
+        event_type: WATCH_TOGETHER_EVENT_TYPE,
+        msgtype: null,
+        state_key: null,
+        limit: 100,
+        since: null,
+      });
+      if (this.#activeRoomId !== roomId) return;
+      this.#mergeEvents(rawEvents);
+    } catch (cause: unknown) {
+      console.warn('[sable watch-together] failed to refresh history', cause);
+    }
+  }
+
+  start(options: { acquireFeed?: boolean } = {}): () => void {
+    const roomId = this.#opts.roomId;
+    this.#resetForRoom(roomId);
     let active = true;
-    const releaseFeed = acquireWidgetFeed(this.#opts.core as CoreClient);
+    const shouldAcquireFeed = options.acquireFeed ?? this.#opts.acquireFeed ?? true;
+    const releaseFeed = shouldAcquireFeed ? acquireWidgetFeed(this.#opts.core as CoreClient) : null;
 
     const unsubscribe = this.#opts.core.subscribeEvents((event) => {
       if (!active || event.type !== 'widget_room_event') return;
       if (!isRecord(event.event)) return;
-      if (event.event.room_id !== this.#opts.roomId) return;
+      if (event.event.room_id !== roomId) return;
       if (event.event.type !== WATCH_TOGETHER_EVENT_TYPE) return;
 
       const parsed = parseWatchTogetherEvent(event.event);
-      if (parsed === null || this.#events.has(parsed.eventId)) return;
+      if (parsed === null) return;
+      const wasOptimistic = this.#optimisticIds.delete(parsed.eventId);
+      if (this.#events.has(parsed.eventId) && !wasOptimistic) return;
       this.#events.set(parsed.eventId, parsed);
-      if (
+
+      const isOwn =
+        wasOptimistic ||
         this.#ownSentIds.has(parsed.eventId) ||
         (parsed.sender === this.#opts.userId &&
-          this.#ownSentTimestamps.has(parsed.snapshot.sentAtMs))
-      ) {
+          this.#ownSentTimestamps.has(parsed.snapshot.sentAtMs));
+      if (isOwn) {
+        this.#calibrateServerClock(parsed.originServerTs, true);
+        const prevEventId = this.state.lastEventId;
+        const nextState = reduceWatchTogetherEvents(
+          [...this.#events.values()],
+          this.#opts.moderatorIds()
+        );
+        this.state = nextState;
+        if (nextState.lastEventId !== prevEventId && nextState.lastEventId !== parsed.eventId) {
+          this.syncEpoch += 1;
+        }
         return;
       }
+
+      this.#calibrateServerClock(parsed.originServerTs, false);
       this.#recompute();
     });
 
     void this.#opts.core.rpc.timeline
       .events({
-        room_id: this.#opts.roomId,
+        room_id: roomId,
         event_type: WATCH_TOGETHER_EVENT_TYPE,
         msgtype: null,
         state_key: null,
@@ -139,12 +258,8 @@ export class WatchTogetherSession {
         since: null,
       })
       .then((rawEvents) => {
-        if (!active) return;
-        for (const raw of rawEvents) {
-          const parsed = parseWatchTogetherEvent(raw);
-          if (parsed !== null) this.#events.set(parsed.eventId, parsed);
-        }
-        this.#recompute();
+        if (!active || this.#activeRoomId !== roomId) return;
+        this.#mergeEvents(rawEvents);
       })
       .catch((cause: unknown) => {
         console.warn('[sable watch-together] failed to load history', cause);
@@ -156,7 +271,7 @@ export class WatchTogetherSession {
     return () => {
       active = false;
       unsubscribe();
-      releaseFeed();
+      releaseFeed?.();
     };
   }
 
@@ -223,13 +338,16 @@ export class WatchTogetherSession {
         content: snapshot,
       });
       this.#ownSentIds.add(eventId);
-      const localEvent: WatchTogetherEvent = {
-        eventId,
-        sender: this.#opts.userId,
-        originServerTs: now,
-        snapshot,
-      };
-      this.#events.set(eventId, localEvent);
+      if (!this.#events.has(eventId)) {
+        this.#optimisticIds.add(eventId);
+        const localEvent: WatchTogetherEvent = {
+          eventId,
+          sender: this.#opts.userId,
+          originServerTs: this.#hasServerClockOffset ? now - this.#serverClockOffsetMs : now,
+          snapshot,
+        };
+        this.#events.set(eventId, localEvent);
+      }
       if (seq === this.#publishSeq) {
         this.state = { ...this.state, lastEventId: eventId };
       }
@@ -382,13 +500,13 @@ export class WatchTogetherSession {
     if (current && current.kind === 'short') {
       this.#shortsBuffer.unshift(current.videoId);
     }
-    return await this.#publish('load', { current: prev, playing: true, positionSec: 0 }, 'ui');
+    return this.#publish('load', { current: prev, playing: true, positionSec: 0 }, 'ui');
   }
 
   async skipNext(): Promise<void> {
     if (!this.canControl) return;
     const [next, ...rest] = this.state.queue;
-    if (next) {
+    if (this.state.queue.length > 0 && next) {
       await this.#publish('skip', {
         current: next,
         queue: rest,

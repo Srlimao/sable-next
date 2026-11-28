@@ -12,12 +12,15 @@
   import { scrollHint } from '#lib/ui/scroll-hint.js';
 
   import type { RoomWidget } from './widget-content.js';
+  import type { WatchTogetherItem } from './watch-together/watch-together-protocol.js';
   import IntegrationManagerDialog from './IntegrationManagerDialog.svelte';
 
   interface Props {
     roomId: string;
     widgets: readonly RoomWidget[];
     canManage?: boolean;
+    watchTogetherCurrent?: WatchTogetherItem | null;
+    watchTogetherPlaying?: boolean;
     onOpen: (widgetId: string) => void;
     onOpenWatchTogether?: () => void;
     onAdd?: (name: string, url: string) => Promise<void>;
@@ -28,6 +31,8 @@
     roomId,
     widgets,
     canManage = false,
+    watchTogetherCurrent = null,
+    watchTogetherPlaying = false,
     onOpen,
     onOpenWatchTogether,
     onAdd,
@@ -92,9 +97,20 @@
 
 {#if onOpenWatchTogether}
   <div class="widgets-builtin">
-    <Button variant="secondary" onclick={onOpenWatchTogether}>
-      <TelevisionSimpleIcon />
-      {i18n.t('widgets.watchTogether')}
+    <Button
+      variant={watchTogetherCurrent ? 'primary' : 'secondary'}
+      onclick={onOpenWatchTogether}
+    >
+      <TelevisionSimpleIcon weight={watchTogetherCurrent ? 'fill' : 'regular'} />
+      <span class="watch-button-text">
+        <span>{i18n.t('widgets.watchTogether')}</span>
+        {#if watchTogetherCurrent}
+          <span class="watch-button-sub">
+            <span class={['watch-button-dot', { playing: watchTogetherPlaying }]}></span>
+            {watchTogetherCurrent.title}
+          </span>
+        {/if}
+      </span>
     </Button>
   </div>
 {/if}
@@ -156,6 +172,37 @@
     border-top: var(--border-width) solid var(--surface-container-line);
     display: grid;
     padding: var(--space-300);
+  }
+
+  .watch-button-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    text-align: start;
+  }
+
+  .watch-button-sub {
+    align-items: center;
+    display: flex;
+    font-size: var(--font-size-small);
+    gap: var(--space-050);
+    opacity: 0.9;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .watch-button-dot {
+    background: currentcolor;
+    border-radius: var(--radius-pill);
+    flex-shrink: 0;
+    height: 0.375rem;
+    opacity: 0.65;
+    width: 0.375rem;
+  }
+
+  .watch-button-dot.playing {
+    opacity: 1;
   }
 
   .widgets-manage {

@@ -153,3 +153,51 @@ test('resetting the panels from an effect does not close the next one opened', (
   expect(runs).toBe(1);
   cleanup();
 });
+
+test('watch together transitions between docked, theater, and maximized modes cleanly', () => {
+  const panels = new RoomPanels();
+  panels.openWatchTogether('https://youtu.be/dQw4w9WgXcQ');
+  expect(panels.widgetsOpen).toBe(true);
+  expect(panels.watchTogetherActive).toBe(true);
+  expect(panels.watchTogetherDockedOpen).toBe(true);
+  expect(panels.watchTogetherVisible).toBe(true);
+
+  panels.toggleWatchTogetherTheater();
+  expect(panels.watchTogetherTheater).toBe(true);
+  expect(panels.watchTogetherMaximized).toBe(false);
+  expect(panels.widgetsOpen).toBe(false);
+  expect(panels.watchTogetherVisible).toBe(true);
+
+  panels.toggleWatchTogetherMaximized();
+  expect(panels.watchTogetherMaximized).toBe(true);
+  expect(panels.watchTogetherTheater).toBe(false);
+  expect(panels.watchTogetherVisible).toBe(true);
+
+  // Restoring from maximized returns to theater when entered from theater
+  panels.exitWatchTogetherMaximized();
+  expect(panels.watchTogetherMaximized).toBe(false);
+  expect(panels.watchTogetherTheater).toBe(true);
+
+  // Entering maximized from docked returns to docked widgets panel on exit
+  panels.toggleWatchTogetherTheater();
+  expect(panels.widgetsOpen).toBe(true);
+  expect(panels.watchTogetherDockedOpen).toBe(true);
+  panels.toggleWatchTogetherMaximized();
+  expect(panels.watchTogetherMaximized).toBe(true);
+  expect(panels.widgetsOpen).toBe(false);
+  panels.exitWatchTogetherMaximized();
+  expect(panels.watchTogetherMaximized).toBe(false);
+  expect(panels.watchTogetherTheater).toBe(false);
+  expect(panels.widgetsOpen).toBe(true);
+  expect(panels.watchTogetherDockedOpen).toBe(true);
+
+  panels.toggleWatchTogetherMaximized();
+  panels.dockWatchTogether();
+  expect(panels.watchTogetherMaximized).toBe(false);
+  expect(panels.widgetsOpen).toBe(true);
+
+  panels.closeWatchTogether();
+  expect(panels.watchTogetherVisible).toBe(false);
+  expect(panels.watchTogetherTheater).toBe(false);
+  expect(panels.watchTogetherMaximized).toBe(false);
+});

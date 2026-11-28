@@ -45,6 +45,7 @@ use crate::{Core, ResultExt, SignedIn};
 
 const MAX_TIMELINE_EVENTS: usize = 500;
 const WIDGET_STATE_TYPE: &str = "im.vector.modular.widgets";
+const WATCH_TOGETHER_EVENT_TYPE: &str = "moe.sable.watch_together";
 const DEFAULT_INTEGRATION_MANAGER: (&str, &str) =
     ("https://scalar.vector.im/api", "https://scalar.vector.im");
 
@@ -337,6 +338,50 @@ fn accepted_urls(content: Option<Value>) -> Vec<String> {
         .unwrap_or_default()
 }
 
+enum TimelineMatch {
+    ReachedSince,
+    Keep(Value),
+    Skip,
+}
+
+fn match_timeline_event(
+    raw_json: &str,
+    room_id: &ruma::RoomId,
+    event_type: &str,
+    msgtype: Option<&str>,
+    state_key: Option<&str>,
+    since: Option<&OwnedEventId>,
+) -> TimelineMatch {
+    let Ok(json) = serde_json::from_str::<Value>(raw_json) else {
+        return TimelineMatch::Skip;
+    };
+
+    if state_key.is_some_and(|wanted| json.get("state_key").and_then(Value::as_str) != Some(wanted))
+    {
+        return TimelineMatch::Skip;
+    }
+    if json.get("type").and_then(Value::as_str) != Some(event_type) {
+        return TimelineMatch::Skip;
+    }
+    if let Some(msgtype) = msgtype
+        && json
+            .get("content")
+            .and_then(|content| content.get("msgtype"))
+            .and_then(Value::as_str)
+            != Some(msgtype)
+    {
+        return TimelineMatch::Skip;
+    }
+
+    if since.is_some_and(|since| {
+        json.get("event_id").and_then(Value::as_str) == Some(since.as_str())
+    }) {
+        return TimelineMatch::ReachedSince;
+    }
+
+    TimelineMatch::Keep(with_room_id(json, room_id))
+}
+
 impl SignedIn {
     pub(crate) async fn room_timeline_events(
         &self,
@@ -348,16 +393,6 @@ impl SignedIn {
         since: Option<&OwnedEventId>,
     ) -> Result<Vec<Value>, RpcError> {
         let client = self.client();
-        let Some(event_cache) = client.event_cache() else {
-            return Ok(Vec::new());
-        };
-        let Ok((cache, _drop_handles)) = event_cache.room(room_id).await else {
-            return Ok(Vec::new());
-        };
-        let Ok(events) = cache.events().await else {
-            return Ok(Vec::new());
-        };
-
         let ceiling = if limit == 0 {
             MAX_TIMELINE_EVENTS
         } else {
@@ -365,38 +400,59 @@ impl SignedIn {
         };
 
         let mut collected = Vec::new();
-        for event in events.iter().rev() {
-            let Ok(json) = serde_json::from_str::<Value>(event.raw().json().get()) else {
-                continue;
-            };
+        if let Some(event_cache) = client.event_cache()
+            && let Ok((cache, _drop_handles)) = event_cache.room(room_id).await
+            && let Ok(events) = cache.events().await
+        {
+            for event in events.iter().rev() {
+                match match_timeline_event(
+                    event.raw().json().get(),
+                    room_id,
+                    event_type,
+                    msgtype,
+                    state_key,
+                    since,
+                ) {
+                    TimelineMatch::ReachedSince => break,
+                    TimelineMatch::Keep(matched) => {
+                        collected.push(matched);
+                        if collected.len() >= ceiling {
+                            break;
+                        }
+                    }
+                    TimelineMatch::Skip => {}
+                }
+            }
+        }
 
-            if state_key
-                .is_some_and(|wanted| json.get("state_key").and_then(Value::as_str) != Some(wanted))
-            {
-                continue;
-            }
-            if json.get("type").and_then(Value::as_str) != Some(event_type) {
-                continue;
-            }
-            if let Some(msgtype) = msgtype
-                && json
-                    .get("content")
-                    .and_then(|content| content.get("msgtype"))
-                    .and_then(Value::as_str)
-                    != Some(msgtype)
-            {
-                continue;
-            }
-
-            if since.is_some_and(|since| {
-                json.get("event_id").and_then(Value::as_str) == Some(since.as_str())
-            }) {
-                break;
-            }
-
-            collected.push(with_room_id(json, room_id));
-            if collected.len() >= ceiling {
-                break;
+        if collected.is_empty()
+            && since.is_none()
+            && event_type == WATCH_TOGETHER_EVENT_TYPE
+            && let Ok(room) = self.room(room_id)
+            && room.state() == RoomState::Joined
+        {
+            let mut options = matrix_sdk::room::MessagesOptions::backward();
+            options.limit = UInt::from(100u32);
+            if let Ok(messages) = room.messages(options).await {
+                for event in &messages.chunk {
+                    match match_timeline_event(
+                        event.raw().json().get(),
+                        room_id,
+                        event_type,
+                        msgtype,
+                        state_key,
+                        since,
+                    ) {
+                        TimelineMatch::ReachedSince => break,
+                        TimelineMatch::Keep(matched) => {
+                            collected.push(matched);
+                            if collected.len() >= ceiling {
+                                break;
+                            }
+                        }
+                        TimelineMatch::Skip => {}
+                    }
+                }
             }
         }
 
@@ -1060,15 +1116,18 @@ impl SignedIn {
             move |raw: Raw<AnySyncTimelineEvent>, room: matrix_sdk::Room| {
                 let core = core.clone();
                 async move {
-                    if !core.core().settings.widget_feed.load(Ordering::Relaxed) {
+                    let kind = raw.get_field::<String>("type").ok().flatten();
+                    if kind.as_deref() == Some("m.room.encrypted") {
+                        return;
+                    }
+                    if !core.core().settings.widget_feed.load(Ordering::Relaxed)
+                        && kind.as_deref() != Some(WATCH_TOGETHER_EVENT_TYPE)
+                    {
                         return;
                     }
                     let Ok(event) = serde_json::from_str::<Value>(raw.json().get()) else {
                         return;
                     };
-                    if event.get("type").and_then(Value::as_str) == Some("m.room.encrypted") {
-                        return;
-                    }
                     core.core().emit_if_current(
                         generation,
                         CoreEvent::WidgetRoomEvent {

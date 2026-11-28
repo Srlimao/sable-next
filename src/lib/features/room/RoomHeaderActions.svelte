@@ -3,6 +3,7 @@
   import YarnIcon from 'phosphor-svelte/lib/YarnIcon';
   import ImagesIcon from 'phosphor-svelte/lib/ImagesIcon';
   import GridFourIcon from 'phosphor-svelte/lib/GridFourIcon';
+  import TelevisionSimpleIcon from 'phosphor-svelte/lib/TelevisionSimpleIcon';
   import { i18n } from '#lib/i18n.js';
   import PanelHeaderButton from '#lib/ui/primitives/PanelHeaderButton.svelte';
   import type { RoomPanels } from './room-panels.svelte.js';
@@ -15,6 +16,9 @@
     widgetCount: number;
     threadsUnread?: number;
     threadsOnly?: boolean;
+    watchTogetherActive?: boolean;
+    watchTogetherTitle?: string | null;
+    onOpenWatchTogether?: () => void;
   }
 
   let {
@@ -25,6 +29,9 @@
     widgetCount,
     threadsUnread = 0,
     threadsOnly = false,
+    watchTogetherActive = false,
+    watchTogetherTitle = null,
+    onOpenWatchTogether,
   }: Props = $props();
 </script>
 
@@ -63,12 +70,28 @@
   {/if}
 {/if}
 {#if !threadsOnly}
+  {#if watchTogetherActive && !panels.watchTogetherVisible && onOpenWatchTogether}
+    <PanelHeaderButton
+      class="watch-together-header-button"
+      label={watchTogetherTitle
+        ? `${i18n.t('widgets.watchTogether')}: ${watchTogetherTitle}`
+        : i18n.t('widgets.watchTogetherActiveBanner')}
+      onclick={onOpenWatchTogether}
+    >
+      <TelevisionSimpleIcon weight="fill" />
+      <span class="watch-live-dot" aria-hidden="true"></span>
+    </PanelHeaderButton>
+  {/if}
   <PanelHeaderButton
     label={i18n.t('widgets.label')}
-    aria-pressed={panels.widgetsOpen || panels.watchTogetherTheater}
+    aria-pressed={panels.widgetsOpen || panels.watchTogetherTheater || panels.watchTogetherMaximized}
     onclick={() => panels.toggleWidgets()}
   >
-    <GridFourIcon weight={panels.widgetsOpen || panels.watchTogetherTheater ? 'fill' : 'regular'} />
+    <GridFourIcon
+      weight={panels.widgetsOpen || panels.watchTogetherTheater || panels.watchTogetherMaximized
+        ? 'fill'
+        : 'regular'}
+    />
     {#if widgetCount > 0}
       <span class="widgets-count" aria-hidden="true">{widgetCount}</span>
     {/if}
@@ -76,6 +99,20 @@
 {/if}
 
 <style>
+  :global(.watch-together-header-button) {
+    position: relative;
+  }
+
+  .watch-live-dot {
+    background: var(--primary-main);
+    border-radius: var(--radius-pill);
+    height: 0.5rem;
+    inset-inline-end: var(--space-050);
+    position: absolute;
+    top: var(--space-050);
+    width: 0.5rem;
+  }
+
   .threads-count,
   .widgets-count {
     background: var(--surface-container-active);

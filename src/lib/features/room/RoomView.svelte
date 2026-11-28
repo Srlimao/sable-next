@@ -1,7 +1,7 @@
 <script lang="ts">
   import PageTitle from '#lib/ui/primitives/PageTitle.svelte';
   import { matrixLinkAction } from '#lib/rooms/matrix-link.js';
-  import { MediaQuery } from 'svelte/reactivity';
+  import { MediaQuery, SvelteSet } from 'svelte/reactivity';
   import { onDestroy, onMount, untrack } from 'svelte';
   import { on } from 'svelte/events';
   import type { RoomListItemView, PerMessageProfileView } from '#src/generated/protocol';
@@ -94,8 +94,13 @@
   import RoomVoiceChat from './RoomVoiceChat.svelte';
   import RoomSidePanels from './RoomSidePanels.svelte';
   import RoomDialogs from './RoomDialogs.svelte';
+  import WatchTogetherBanner from '#lib/features/widgets/watch-together/WatchTogetherBanner.svelte';
   import WatchTogetherView from '#lib/features/widgets/watch-together/WatchTogetherView.svelte';
-  import { ensureWatchTogetherRoomWidget } from '#lib/features/widgets/watch-together/watch-together-session.svelte.js';
+  import {
+    ensureWatchTogetherRoomWidget,
+    WatchTogetherSession,
+  } from '#lib/features/widgets/watch-together/watch-together-session.svelte.js';
+  import DialogFrame from '#lib/ui/primitives/DialogFrame.svelte';
   import ResizeHandle from '#lib/ui/primitives/ResizeHandle.svelte';
   import { offersCall, RoomCallSupport } from './room-call-support.svelte.js';
   import { refreshRoomMembers } from './room-member-refresh.svelte.js';
@@ -455,6 +460,13 @@
     0.75
   );
   watchStageRatio.restore();
+  const voiceWatchStageRatio = new PanelWidth(
+    'sable-voice-watch-stage-ratio',
+    0.72,
+    0.35,
+    0.85
+  );
+  voiceWatchStageRatio.restore();
   let timelineHeight = $state(0);
   let isVoiceRoom = $derived(resolvedRoom?.room_kind === 'voice');
   const voiceChatWidth = new PanelWidth('sable-voice-chat-width', 400, 300, 1000);
@@ -589,6 +601,73 @@
       roomSession.permissions?.own_power_level ?? 0,
       'im.vector.modular.widgets'
     )
+  );
+
+  async function ensureWatchWidget(fallbackUrl: string): Promise<void> {
+    await ensureWatchTogetherRoomWidget({
+      core,
+      roomId: resolvedRoomId,
+      canManage: canManageWidgets,
+      widgets: roomSession.widgets,
+      title: i18n.t('widgets.watchTogether'),
+      fallbackUrl,
+      refreshWidgets: () => roomSession.details.refreshWidgets(),
+    });
+  }
+
+  let watchModeratorIds = $derived.by(() => {
+    const ids = new SvelteSet<string>();
+    for (const member of memberLoader.members) {
+      if (member.power_level >= 50) ids.add(member.user_id);
+    }
+    if (canManageWidgets && core.session?.user_id) ids.add(core.session.user_id);
+    return ids;
+  });
+
+  const watchTogetherSession = new WatchTogetherSession({
+    core,
+    get roomId() {
+      return resolvedRoomId;
+    },
+    get userId() {
+      return core.session?.user_id ?? '';
+    },
+    isModerator: () => canManageWidgets || watchModeratorIds.has(core.session?.user_id ?? ''),
+    moderatorIds: () => watchModeratorIds,
+    acquireFeed: false,
+    onEnsureRoomWidget: ensureWatchWidget,
+  });
+
+  $effect(() => {
+    const target = resolvedRoomId;
+    if (!roomJoined || !target) return;
+    return untrack(() => watchTogetherSession.start({ acquireFeed: false }));
+  });
+
+  let wasOnlineForWatch = false;
+  $effect(() => {
+    const isOnline = online;
+    if (isOnline && !wasOnlineForWatch && roomJoined) {
+      void untrack(() => watchTogetherSession.refresh());
+    }
+    wasOnlineForWatch = isOnline;
+  });
+
+  let dismissedWatchKey = $state<string | null>(null);
+  $effect(() => {
+    void resolvedRoomId;
+    dismissedWatchKey = null;
+  });
+  let watchTogetherBannerKey = $derived(
+    watchTogetherSession.state.current
+      ? `${watchTogetherSession.state.sessionId}:${watchTogetherSession.state.current.id}`
+      : null
+  );
+  let watchTogetherBannerVisible = $derived(
+    watchTogetherSession.active &&
+      !panels.watchTogetherVisible &&
+      watchTogetherBannerKey !== null &&
+      dismissedWatchKey !== watchTogetherBannerKey
   );
 
   $effect(() => {
@@ -1031,6 +1110,9 @@
       widgetCount={roomSession.widgets.length}
       threadsUnread={threads.activity.size}
       threadsOnly={phone}
+      watchTogetherActive={watchTogetherSession.active}
+      watchTogetherTitle={watchTogetherSession.state.current?.title ?? null}
+      onOpenWatchTogether={() => panels.openWatchTogether()}
     />
   {/snippet}
   <RoomHeader
@@ -1111,53 +1193,62 @@
     bind:clientHeight={timelineHeight}
   >
     {#if !desktop}{@render roomHeader()}{/if}
-    {#if callShown && (voiceView || !isVoiceRoom)}
-      <RoomCallStage
-        docked={!voiceView}
-        ratio={callStageRatio}
-        {timelineHeight}
-        members={memberLoader.members}
-        onInvite={roomSession.permissions?.can_invite ? () => (inviteOpen = true) : undefined}
+    {#if watchTogetherBannerVisible}
+      <WatchTogetherBanner
+        title={watchTogetherSession.state.current?.title ?? i18n.t('widgets.watchTogether')}
+        playing={watchTogetherSession.state.playing}
+        actorName={watchTogetherSession.state.lastActor
+          ? (memberDisplayName(watchTogetherSession.state.lastActor) ??
+            watchTogetherSession.state.lastActor)
+          : null}
+        onJoin={() => panels.openWatchTogether()}
+        onDismiss={() => {
+          dismissedWatchKey = watchTogetherBannerKey;
+        }}
       />
     {/if}
-    {#if panels.watchTogetherTheater && desktop}
-      <div class="watch-stage" style:flex-basis={`${watchStageRatio.width * 100}%`}>
-        <WatchTogetherView
-          roomId={resolvedRoomId}
-          canManage={canManageWidgets}
-          members={memberLoader.members}
-          theater
-          pendingUrl={panels.pendingWatchUrl}
-          onConsumePendingUrl={() => panels.consumePendingWatchUrl()}
-          onToggleTheater={() => panels.toggleWatchTogetherTheater()}
-          onCloseTheater={() => panels.closeWatchTogether()}
-          onEnsureRoomWidget={(fallbackUrl) =>
-            ensureWatchTogetherRoomWidget({
-              core,
-              roomId: resolvedRoomId,
-              canManage: canManageWidgets,
-              widgets: roomSession.widgets,
-              title: i18n.t('widgets.watchTogether'),
-              fallbackUrl,
-              refreshWidgets: () => roomSession.details.refreshWidgets(),
-            })}
-        />
-        <ResizeHandle
-          value={watchStageRatio.width}
-          min={watchStageRatio.min}
-          max={watchStageRatio.max}
-          label={i18n.t('widgets.watchTogether')}
-          grow="down"
-          step={0.05}
-          shiftStep={0.15}
-          fromPixels={(pixels) => (timelineHeight > 0 ? pixels / timelineHeight : 0)}
-          onResize={(next) => watchStageRatio.resize(next)}
-          onCommit={() => watchStageRatio.commit()}
-        />
-      </div>
-    {/if}
     {#if voiceView}
-      {#if !callShown}
+      {#if panels.watchTogetherTheater && desktop}
+        <div
+          class="watch-stage voice-stage"
+          style:flex-basis={`${voiceWatchStageRatio.width * 100}%`}
+        >
+          <WatchTogetherView
+            roomId={resolvedRoomId}
+            session={watchTogetherSession}
+            canManage={canManageWidgets}
+            members={memberLoader.members}
+            theater
+            pendingUrl={panels.pendingWatchUrl}
+            onConsumePendingUrl={() => panels.consumePendingWatchUrl()}
+            onToggleTheater={() => panels.toggleWatchTogetherTheater()}
+            onToggleMaximize={() => panels.toggleWatchTogetherMaximized()}
+            onCloseTheater={() => panels.closeWatchTogether()}
+            onEnsureRoomWidget={ensureWatchWidget}
+          />
+          <ResizeHandle
+            value={voiceWatchStageRatio.width}
+            min={voiceWatchStageRatio.min}
+            max={voiceWatchStageRatio.max}
+            label={i18n.t('widgets.watchTogether')}
+            grow="down"
+            step={0.05}
+            shiftStep={0.15}
+            fromPixels={(pixels) => (timelineHeight > 0 ? pixels / timelineHeight : 0)}
+            onResize={(next) => voiceWatchStageRatio.resize(next)}
+            onCommit={() => voiceWatchStageRatio.commit()}
+          />
+        </div>
+      {/if}
+      {#if callShown}
+        <RoomCallStage
+          docked={false}
+          ratio={callStageRatio}
+          {timelineHeight}
+          members={memberLoader.members}
+          onInvite={roomSession.permissions?.can_invite ? () => (inviteOpen = true) : undefined}
+        />
+      {:else}
         <VoiceLobby
           participants={callParticipants}
           screenSharers={resolvedRoom?.screen_sharers ?? []}
@@ -1175,6 +1266,47 @@
         />
       {/if}
     {:else}
+      {#if callShown && !isVoiceRoom}
+        <RoomCallStage
+          docked
+          ratio={callStageRatio}
+          {timelineHeight}
+          members={memberLoader.members}
+          onInvite={roomSession.permissions?.can_invite ? () => (inviteOpen = true) : undefined}
+        />
+      {/if}
+      {#if panels.watchTogetherTheater && desktop}
+        <div
+          class="watch-stage"
+          style:flex-basis={`${Math.min(watchStageRatio.width, callShown ? 0.45 : watchStageRatio.max) * 100}%`}
+        >
+          <WatchTogetherView
+            roomId={resolvedRoomId}
+            session={watchTogetherSession}
+            canManage={canManageWidgets}
+            members={memberLoader.members}
+            theater
+            pendingUrl={panels.pendingWatchUrl}
+            onConsumePendingUrl={() => panels.consumePendingWatchUrl()}
+            onToggleTheater={() => panels.toggleWatchTogetherTheater()}
+            onToggleMaximize={() => panels.toggleWatchTogetherMaximized()}
+            onCloseTheater={() => panels.closeWatchTogether()}
+            onEnsureRoomWidget={ensureWatchWidget}
+          />
+          <ResizeHandle
+            value={watchStageRatio.width}
+            min={watchStageRatio.min}
+            max={watchStageRatio.max}
+            label={i18n.t('widgets.watchTogether')}
+            grow="down"
+            step={0.05}
+            shiftStep={0.15}
+            fromPixels={(pixels) => (timelineHeight > 0 ? pixels / timelineHeight : 0)}
+            onResize={(next) => watchStageRatio.resize(next)}
+            onCommit={() => watchStageRatio.commit()}
+          />
+        </div>
+      {/if}
       {@render chat()}
     {/if}
   </div>
@@ -1219,11 +1351,37 @@
     {memberLoader}
     {roomSession}
     {canManageWidgets}
+    {watchTogetherSession}
     onOpenThread={openThread}
     onJump={jumpToEvent}
     onMatrixLink={handleMatrixLink}
     onMemberProfile={openProfile}
   />
+
+  <DialogFrame
+    open={panels.watchTogetherMaximized}
+    variant="fullscreen"
+    label={i18n.t('widgets.watchTogether')}
+    onOpenChange={(open: boolean) => {
+      if (!open) panels.exitWatchTogetherMaximized();
+    }}
+  >
+    {#if panels.watchTogetherMaximized}
+      <WatchTogetherView
+        roomId={resolvedRoomId}
+        session={watchTogetherSession}
+        canManage={canManageWidgets}
+        members={memberLoader.members}
+        maximized
+        pendingUrl={panels.pendingWatchUrl}
+        onConsumePendingUrl={() => panels.consumePendingWatchUrl()}
+        onToggleMaximize={() => panels.exitWatchTogetherMaximized()}
+        onToggleTheater={desktop ? () => panels.dockWatchTogether() : undefined}
+        onCloseTheater={() => panels.closeWatchTogether()}
+        onEnsureRoomWidget={ensureWatchWidget}
+      />
+    {/if}
+  </DialogFrame>
 
   <RoomDialogs
     room={resolvedRoom}
@@ -1305,16 +1463,24 @@
     height: 100%;
     min-height: 0;
     min-width: 0;
+    overflow: hidden;
     position: relative;
   }
 
   .watch-stage {
     border-bottom: var(--border-width) solid var(--surface-container-line);
+    box-sizing: border-box;
     display: flex;
     flex: 0 0 auto;
     flex-direction: column;
+    max-height: 75%;
     min-height: 14rem;
+    overflow: hidden;
     position: relative;
+  }
+
+  .watch-stage.voice-stage {
+    max-height: 85%;
   }
 
   .watch-stage :global(.resize-handle) {

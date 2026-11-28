@@ -4383,7 +4383,13 @@
     "watchTogetherResizeShort": "Resize Short player",
     "watchTogetherShortsScroll": "Shorts scroll",
     "watchTogetherPrevShort": "Previous Short",
-    "watchTogetherNextShort": "Next Short"
+    "watchTogetherNextShort": "Next Short",
+    "watchTogetherMaximize": "Maximize Watch Together",
+    "watchTogetherRestore": "Exit maximized view",
+    "watchTogetherToggleQueue": "Toggle queue",
+    "watchTogetherJoin": "Join",
+    "watchTogetherActiveBanner": "Watch Together active",
+    "watchTogetherDismissBanner": "Dismiss Watch Together banner"
   },
   "pdf": {
     "documentLabel": "{{name}}, page {{page}} of {{pages}}",

@@ -24,8 +24,19 @@ export class RoomPanels {
   side = $state<SidePanel | null>(desktopMembersPreferred ? 'desktopMembers' : null);
   swapped = $state(false);
   watchTogetherActive = $state(false);
+  watchTogetherDockedOpen = $state(false);
   watchTogetherTheater = $state(false);
+  watchTogetherMaximized = $state(false);
+  watchTogetherReturnToTheater = $state(false);
   pendingWatchUrl = $state<string | null>(null);
+
+  get watchTogetherVisible(): boolean {
+    return (
+      this.watchTogetherMaximized ||
+      this.watchTogetherTheater ||
+      (this.widgetsOpen && this.watchTogetherDockedOpen)
+    );
+  }
 
   #show(panel: SidePanel | null): void {
     this.swapped = this.side !== null && panel !== null && this.side !== panel;
@@ -97,7 +108,10 @@ export class RoomPanels {
     this.threadRootId = null;
     untrack(() => {
       this.watchTogetherActive = false;
+      this.watchTogetherDockedOpen = false;
       this.watchTogetherTheater = false;
+      this.watchTogetherMaximized = false;
+      this.watchTogetherReturnToTheater = false;
       this.pendingWatchUrl = null;
       const side = this.side;
       if (side !== 'members' && side !== 'desktopMembers' && side !== 'widgets') {
@@ -108,11 +122,11 @@ export class RoomPanels {
 
   openWatchTogether(url: string | null = null): void {
     if (url !== null) this.pendingWatchUrl = url;
+    if (this.watchTogetherMaximized || this.watchTogetherTheater) return;
     this.watchTogetherActive = true;
-    if (!this.watchTogetherTheater) {
-      this.threadRootId = null;
-      this.#show('widgets');
-    }
+    this.watchTogetherDockedOpen = true;
+    this.threadRootId = null;
+    this.#show('widgets');
   }
 
   consumePendingWatchUrl(): void {
@@ -123,22 +137,65 @@ export class RoomPanels {
     this.watchTogetherActive = false;
   }
 
+  setWatchTogetherDockedOpen(open: boolean): void {
+    this.watchTogetherDockedOpen = open;
+  }
+
   toggleWatchTogetherTheater(): void {
     if (this.watchTogetherTheater) {
-      this.watchTogetherTheater = false;
-      this.watchTogetherActive = true;
-      this.threadRootId = null;
-      this.#show('widgets');
+      this.dockWatchTogether();
     } else {
+      this.watchTogetherMaximized = false;
       this.watchTogetherTheater = true;
       this.watchTogetherActive = false;
+      this.watchTogetherDockedOpen = false;
       if (this.side === 'widgets') this.#show(this.#home('widgets'));
     }
   }
 
+  toggleWatchTogetherMaximized(): void {
+    if (this.watchTogetherMaximized) {
+      this.exitWatchTogetherMaximized();
+      return;
+    }
+    this.watchTogetherReturnToTheater = this.watchTogetherTheater;
+    this.watchTogetherMaximized = true;
+    this.watchTogetherTheater = false;
+    this.watchTogetherActive = false;
+    this.watchTogetherDockedOpen = false;
+    if (this.side === 'widgets') this.#show(this.#home('widgets'));
+  }
+
+  exitWatchTogetherMaximized(): void {
+    if (!this.watchTogetherMaximized) return;
+    this.watchTogetherMaximized = false;
+    if (this.watchTogetherReturnToTheater) {
+      this.watchTogetherTheater = true;
+    } else {
+      this.watchTogetherActive = true;
+      this.watchTogetherDockedOpen = true;
+      this.threadRootId = null;
+      this.#show('widgets');
+    }
+    this.watchTogetherReturnToTheater = false;
+  }
+
+  dockWatchTogether(): void {
+    this.watchTogetherMaximized = false;
+    this.watchTogetherTheater = false;
+    this.watchTogetherReturnToTheater = false;
+    this.watchTogetherActive = true;
+    this.watchTogetherDockedOpen = true;
+    this.threadRootId = null;
+    this.#show('widgets');
+  }
+
   closeWatchTogether(): void {
     this.watchTogetherActive = false;
+    this.watchTogetherDockedOpen = false;
     this.watchTogetherTheater = false;
+    this.watchTogetherMaximized = false;
+    this.watchTogetherReturnToTheater = false;
     this.pendingWatchUrl = null;
   }
 
